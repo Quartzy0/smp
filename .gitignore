@@ -1,0 +1,9 @@
+playlists
+tracks
+cmake-build-debug
+build
+.ccls-cache
+compile_commands.json
+.dir-locals.el
+.idea
+run.sh
