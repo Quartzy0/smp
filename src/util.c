@@ -143,6 +143,7 @@ rek_mkdir(const char *path) {
         rek_mkdir(path);
         *sep = '/';
     }
+    if (strlen(path)==0)return;
     if (mkdir(path, 0777) && errno != EEXIST)
         printf("[util] Error while trying to create '%s': %s\n", path, strerror(errno));
 }

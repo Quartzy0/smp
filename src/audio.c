@@ -25,7 +25,6 @@ PaStream *stream;
 callback_data_s data;
 int status = 0;
 bool started = false;
-bool inited = false;
 double volume = 0.1;
 int64_t seek = 0;
 size_t offset = 0;
@@ -99,7 +98,6 @@ int init() {
     data.buffer = malloc(sizeof(*data.buffer) * 30000000); //Pre allocate some amount (120MB)
     data.buffer_size = sizeof(*data.buffer) * 30000000;
     printf("[audio] Allocated %zu bytes for music\n", data.buffer_size);
-    inited = true;
     return 0;
 }
 
@@ -218,6 +216,5 @@ int clean_audio() {
     }
     free(data.buffer);
     free(current_file);
-    inited = false;
     return 0;
 }

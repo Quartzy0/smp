@@ -10,18 +10,17 @@
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-
-#define PRELOAD_COUNT 3
+#include "config.h"
 
 PlaylistInfo cplaylist;
 size_t track_index = -1;
-Track *tracks;
+Track *tracks = NULL;
 size_t track_count;
 
 void
 redo_audio() {
     printf("[ctrl] Attempting to download new tracks\n");
-    for (int i = 0; i < PRELOAD_COUNT; ++i) {
+    for (int i = 0; i < preload_amount; ++i) {
         if (track_index + i >= track_count) break;
         while (tracks[track_index + i].download_state == DS_DOWNLOADING) {
             printf("[ctrl] Sleep sleep...\n");
@@ -190,9 +189,14 @@ download_checks(void *arg) {
 }
 
 int main(int argc, char **argv) {
+    if(load_config()){
+        return EXIT_FAILURE;
+    }
+
     get_token();
     sem_init(&state_change_lock, 0, 0);
 
+    volume = initial_volume;
     init();
 
     pthread_t download_thread = 0;
@@ -214,6 +218,7 @@ int main(int argc, char **argv) {
     clean_audio();
     free_playlist(&cplaylist);
     cleanup();
+    clean_config();
 
     return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <dirent.h>
+#include "config.h"
 
 char *authHeader;
 const char *searchUrl1 = "https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=%7B%22searchTerm%22%3A%22";
@@ -29,12 +30,8 @@ const size_t getTrackUrl2Size = sizeof(getTrackUrl2) - 1;
 const char *exts_template = ".%(ext)s";
 const size_t exts_template_len = 8;
 
-const char *track_save_path = "tracks/";
-const size_t track_save_path_len = 7;
 const char *track_ext = ".ogg";
 const size_t track_ext_len = 4;
-const char playlist_save_path[] = "playlists/";
-const size_t playlist_save_path_len = sizeof(playlist_save_path) - 1;
 
 const char recommendations_base_url[] = "https://api.spotify.com/v1/recommendations?seed_tracks=";
 const size_t recommendations_base_url_len = sizeof(recommendations_base_url) - 1;

@@ -116,6 +116,7 @@ void get_track_metadata(DBusMessageIter *iter, Track *track) {
     add_dict_entry(&dict, "xesam:title", track->spotify_name, DBUS_TYPE_STRING);
 
     dbus_message_iter_close_container(iter, &dict);
+    free(obj_path);
 }
 
 void get_playlist_dbus(DBusMessageIter *iter, PlaylistInfo *info) {

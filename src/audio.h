@@ -14,7 +14,6 @@ extern int64_t seek;
 extern size_t offset;
 extern size_t frames;
 extern int audio_samplerate;
-extern bool inited;
 
 #define FRAMES_PER_BUFFER   (512)
 
