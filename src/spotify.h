@@ -26,6 +26,7 @@ typedef struct Track {
     char *spotify_album_art;
     char *artist;
     char *artist_escaped;
+    uint32_t duration_ms;
     uint32_t download_state; //enum DownloadState
 } Track;
 

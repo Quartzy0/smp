@@ -233,6 +233,8 @@ track_by_id(const char *id, Track **track) {
             cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(trackJson, "album"), "coverArt"), "sources"),
             0), "url")->valuestring);
     (*track)->download_state = DS_NOT_DOWNLOADED;
+    (*track)->duration_ms = cJSON_GetObjectItem(cJSON_GetObjectItem(trackJson, "duration"),
+                                                "totalMilliseconds")->valueint;
 
     cJSON *artists = cJSON_GetObjectItem(cJSON_GetObjectItem(trackJson, "artistsWithRoles"), "items");
     cJSON *element;
@@ -318,6 +320,7 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
         (*tracksOut)[i].artist_escaped = urlencode((*tracksOut)[i].artist);
         (*tracksOut)[i].spotify_album_art = strdup(playlistOut->image_url);
         (*tracksOut)[i].download_state = DS_NOT_DOWNLOADED;
+        (*tracksOut)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
         i++;
     }
     playlistOut->track_count = i;
@@ -402,6 +405,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
         (*tracksOut)[i].spotify_album_art = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(
                 cJSON_GetObjectItem(track, "album"), "images"), 0), "url")->valuestring);
         (*tracksOut)[i].download_state = DS_NOT_DOWNLOADED;
+        (*tracksOut)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
         i++;
     }
     playlistOut->track_count = i;
@@ -610,6 +614,7 @@ playlist_filepath(char *id, char **out, bool album) {
  *  (each item)
  *      spotify id (same as before)
  *      spotify uri: 36 bytes; not null terminated because the length is always the same
+ *      duration in ms: uint32_t - 4 bytes
  *      name: null terminated string
  *      album art uri: null terminated string
  *      artist name: null terminated string
@@ -653,6 +658,8 @@ save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks) {
         i += 22;
         memcpy(&buffer[i], tracks[j].spotify_uri, 36);
         i += 36;
+        memcpy(&buffer[i], &tracks[j].duration_ms, sizeof(tracks[j].duration_ms));
+        i += sizeof(tracks[j].duration_ms);
         memcpy(&buffer[i], tracks[j].spotify_name, name_len);
         i += name_len;
         memcpy(&buffer[i], tracks[j].spotify_album_art, album_len);
@@ -712,6 +719,8 @@ read_playlist_from_file(const char *path, PlaylistInfo *playlistOut, Track **tra
         memcpy(tracks[j].spotify_uri, &buffer[i], 36);
         i += 36;
         tracks[j].spotify_uri[36] = 0;
+        memcpy(&tracks[j].duration_ms, &buffer[i], sizeof(tracks[j].duration_ms));
+        i += sizeof(tracks[j].duration_ms);
         tracks[j].spotify_name = strdup(&buffer[i]);
         i += strlen(tracks[j].spotify_name) + 1;
         tracks[j].spotify_name_escaped = urlencode(tracks[j].spotify_name);
