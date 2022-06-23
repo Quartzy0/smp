@@ -26,11 +26,13 @@ typedef struct Track {
     char *spotify_album_art;
     char *artist;
     char *artist_escaped;
+    char spotify_artist_id[SPOTIFY_ID_LEN_NULL];
     uint32_t duration_ms;
     uint32_t download_state; //enum DownloadState
 } Track;
 
-typedef struct PlaylistInfo { //Same as the playlist struct but without the tracks. Used when sending info about non-loaded playlists over dbus
+typedef struct PlaylistInfo {
+    bool not_empty; //Used when no playlist is playing
     bool album; //This struct represents both playlists and albums.
     char *name;
     char *image_url;
@@ -65,8 +67,11 @@ void track_filepath(Track *track, char **out);
 
 void playlist_filepath(char *id, char **out, bool album);
 
-int get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **seed_genres, size_t genre_count,
-                        size_t limit, Track **tracksOut, size_t *track_count);
+int get_recommendations(char **seed_tracks, size_t seed_track_count, char **seed_artists, size_t seed_artist_count,
+                        char **seed_genres, size_t genre_count, size_t limit, Track **tracksOut, size_t *track_count);
+
+int get_recommendations_from_tracks(Track *tracks, size_t track_count, size_t limit, Track **tracksOut,
+                                    size_t *track_count_out);
 
 void save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks);
 

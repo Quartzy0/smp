@@ -33,7 +33,6 @@ redo_audio() {
         }
         download_track(&tracks[track_index + i], !i);
     }
-    if (!inited) init();
     printf("[ctrl] Playing '%s' by %s\n", tracks[track_index].spotify_name,
            tracks[track_index].artist);
     char *file = NULL;
@@ -52,8 +51,10 @@ download_checks(void *arg) {
         Action a = front;
         switch (a.type) {
             case ACTION_QUIT: {
-                pause();
-                stop();
+                if (started) {
+                    pause();
+                    stop();
+                }
                 goto end;
             }
             case ACTION_ALBUM: {
@@ -133,7 +134,9 @@ download_checks(void *arg) {
                         if (loop_mode == LOOP_MODE_PLAYLIST) {
                             track_index = 0;
                         } else {
-                            break;
+                            //Continue playing recommendations
+                            if (get_recommendations_from_tracks(tracks, track_count, 30, &tracks, &track_count)) break;
+                            free_playlist(&cplaylist);
                         }
                     } else {
                         track_index += a.position;
@@ -190,7 +193,9 @@ int main(int argc, char **argv) {
     get_token();
     sem_init(&state_change_lock, 0, 0);
 
-    pthread_t download_thread;
+    init();
+
+    pthread_t download_thread = 0;
     int err = pthread_create(&download_thread, NULL, &download_checks, NULL);
     if (err) {
         fprintf(stderr, "[ctrl] Error occurred while trying to create downloader thread: %s\n", strerror(errno));
@@ -200,7 +205,10 @@ int main(int argc, char **argv) {
     init_dbus();
     handle_message();
 
-    pthread_join(download_thread, NULL);
+    err = pthread_join(download_thread, NULL);
+    if (err) {
+        fprintf(stderr, "[ctrl] Error occurred while trying to wait for control thread to exit: %s\n", strerror(errno));
+    }
 
     sem_destroy(&state_change_lock);
     clean_audio();

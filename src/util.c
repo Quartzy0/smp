@@ -2,6 +2,8 @@
 #include <curl/curl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "spotify.h"
 
 Action action_queue[QUEUE_MAX];
@@ -111,20 +113,48 @@ sanitize(char **in) {
 
 int
 compare_alphabetical(const void *a, const void *b) {
-    return strcmp(((const PlaylistInfo*) a)->name, ((const PlaylistInfo*) b)->name);
+    return strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
 }
 
 int
 compare_alphabetical_reverse(const void *a, const void *b) {
-    return -strcmp(((const PlaylistInfo*) a)->name, ((const PlaylistInfo*) b)->name);
+    return -strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
 }
 
 int
-compare_last_played(const void *a, const void *b){
-    return (int) (((const PlaylistInfo*) b)->last_played-((const PlaylistInfo*) a)->last_played);
+compare_last_played(const void *a, const void *b) {
+    return (int) (((const PlaylistInfo *) b)->last_played - ((const PlaylistInfo *) a)->last_played);
 }
 
 int
-compare_last_played_reverse(const void *a, const void *b){
-    return (int) (((const PlaylistInfo*) a)->last_played-((const PlaylistInfo*) b)->last_played);
+compare_last_played_reverse(const void *a, const void *b) {
+    return (int) (((const PlaylistInfo *) a)->last_played - ((const PlaylistInfo *) b)->last_played);
+}
+
+int compare_artist_quantities(const void *a, const void *b) {
+    return (int) (((struct ArtistQuantity *) b)->appearances - ((struct ArtistQuantity *) a)->appearances);
+}
+
+void
+rek_mkdir(const char *path) {
+    char *sep = strrchr(path, '/');
+    if (sep != NULL) {
+        *sep = 0;
+        rek_mkdir(path);
+        *sep = '/';
+    }
+    if (mkdir(path, 0777) && errno != EEXIST)
+        printf("[util] Error while trying to create '%s': %s\n", path, strerror(errno));
+}
+
+FILE
+*fopen_mkdir(const char *path, char *mode) {
+    char *sep = strrchr(path, '/');
+    if (sep) {
+        char *path0 = strdup(path);
+        path0[sep - path] = 0;
+        rek_mkdir(path0);
+        free(path0);
+    }
+    return fopen(path, mode);
 }

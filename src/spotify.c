@@ -161,6 +161,10 @@ search(const char *query, Track **tracks, size_t *count) {
         (*tracks)[i].artist = strdup(cJSON_GetObjectItem(cJSON_GetObjectItem(
                                                                  cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(data, "artists"), "items"), 0), "profile"),
                                                          "name")->valuestring);
+        char *artist_uri = strdup(cJSON_GetObjectItem(
+                cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(data, "artists"), "items"), 0),
+                "uri")->valuestring);
+        memcpy((*tracks)[i].spotify_artist_id, strrchr(artist_uri, ':'), SPOTIFY_ID_LEN_NULL);
         (*tracks)[i].artist_escaped = urlencode((*tracks)[i].artist);
         sanitize(&(*tracks)[i].artist);
 
@@ -246,6 +250,8 @@ track_by_id(const char *id, Track **track) {
     (*track)->artist = strdup(
             cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(element, "artist"), "profile"),
                                 "name")->valuestring);
+    char *artist_uri = strdup(cJSON_GetObjectItem(cJSON_GetObjectItem(element, "artist"), "uri")->valuestring);
+    memcpy((*track)->spotify_artist_id, strrchr(artist_uri, ':'), SPOTIFY_ID_LEN_NULL);
     sanitize(&(*track)->artist);
     (*track)->artist_escaped = urlencode((*track)->artist);
 
@@ -298,6 +304,7 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
         return 1;
     }
 
+    playlistOut->not_empty = true;
     playlistOut->album = true;
     playlistOut->name = strdup(cJSON_GetObjectItem(root, "name")->valuestring);
     cJSON *tracks_array = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "tracks"), "items");
@@ -318,6 +325,9 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
                 cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
         sanitize(&(*tracksOut)[i].artist);
         (*tracksOut)[i].artist_escaped = urlencode((*tracksOut)[i].artist);
+        memcpy((*tracksOut)[i].spotify_artist_id,
+               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
+               SPOTIFY_ID_LEN_NULL);
         (*tracksOut)[i].spotify_album_art = strdup(playlistOut->image_url);
         (*tracksOut)[i].download_state = DS_NOT_DOWNLOADED;
         (*tracksOut)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
@@ -378,6 +388,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
         return 1;
     }
 
+    playlistOut->not_empty = true;
     playlistOut->album = false;
     playlistOut->name = strdup(cJSON_GetObjectItem(root, "name")->valuestring);
     playlistOut->image_url = strdup(
@@ -402,6 +413,9 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
                 cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
         sanitize(&(*tracksOut)[i].artist);
         (*tracksOut)[i].artist_escaped = urlencode((*tracksOut)[i].artist);
+        memcpy((*tracksOut)[i].spotify_artist_id,
+               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
+               SPOTIFY_ID_LEN_NULL);
         (*tracksOut)[i].spotify_album_art = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(
                 cJSON_GetObjectItem(track, "album"), "images"), 0), "url")->valuestring);
         (*tracksOut)[i].download_state = DS_NOT_DOWNLOADED;
@@ -444,11 +458,10 @@ free_tracks(Track *track, size_t count) {
 
 void
 free_playlist(PlaylistInfo *playlist) {
-    playlist->track_count = 0;
+    if (!playlist->not_empty)return;
     free(playlist->name);
-    playlist->name = NULL;
     free(playlist->image_url);
-    playlist->image_url = NULL;
+    memset(playlist, 0, sizeof(*playlist));
 }
 
 typedef struct DownloadParams {
@@ -615,6 +628,7 @@ playlist_filepath(char *id, char **out, bool album) {
  *      spotify id (same as before)
  *      spotify uri: 36 bytes; not null terminated because the length is always the same
  *      duration in ms: uint32_t - 4 bytes
+ *      artist id: 22 byte string
  *      name: null terminated string
  *      album art uri: null terminated string
  *      artist name: null terminated string
@@ -660,6 +674,8 @@ save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks) {
         i += 36;
         memcpy(&buffer[i], &tracks[j].duration_ms, sizeof(tracks[j].duration_ms));
         i += sizeof(tracks[j].duration_ms);
+        memcpy(&buffer[i], tracks[j].spotify_artist_id, 22);
+        i += 22;
         memcpy(&buffer[i], tracks[j].spotify_name, name_len);
         i += name_len;
         memcpy(&buffer[i], tracks[j].spotify_album_art, album_len);
@@ -670,7 +686,12 @@ save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks) {
     i -= sizeof(i);
     memcpy(buffer, &i, sizeof(i));
 
-    FILE *fp = fopen(path, "w");
+    FILE *fp = fopen_mkdir(path, "w");
+    if (!fp) {
+        fprintf(stderr, "[spotify] Error when opening file to save playlist: %s\n", strerror(errno));
+        free(buffer);
+        return;
+    }
 
     fwrite(buffer, sizeof(*buffer), i + sizeof(i), fp);
 
@@ -681,6 +702,10 @@ save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks) {
 void
 save_playlist_last_played_to_file(const char *path, PlaylistInfo *playlist) {
     FILE *fp = fopen(path, "r+");
+    if (!fp) {
+        fprintf(stderr, "[spotify] Error when saving playlist to file: %s\n", strerror(errno));
+        return;
+    }
 
     fseek(fp, sizeof(playlist->album) + sizeof(size_t), SEEK_SET);
     fwrite(&playlist->last_played, sizeof(playlist->last_played), 1, fp);
@@ -690,6 +715,10 @@ save_playlist_last_played_to_file(const char *path, PlaylistInfo *playlist) {
 void
 read_playlist_from_file(const char *path, PlaylistInfo *playlistOut, Track **tracksOut) {
     FILE *fp = fopen(path, "r");
+    if (!fp) {
+        fprintf(stderr, "[spotify] Error when saving playlist to file: %s\n", strerror(errno));
+        return;
+    }
 
     size_t size = 0;
     fread(&size, sizeof(size), 1, fp);
@@ -699,6 +728,7 @@ read_playlist_from_file(const char *path, PlaylistInfo *playlistOut, Track **tra
     fclose(fp);
 
     size_t i = 0;
+    playlistOut->not_empty = true;
     playlistOut->album = buffer[i++];
     memcpy(&playlistOut->last_played, &buffer[i], sizeof(playlistOut->last_played));
     i += sizeof(playlistOut->last_played);
@@ -721,6 +751,9 @@ read_playlist_from_file(const char *path, PlaylistInfo *playlistOut, Track **tra
         tracks[j].spotify_uri[36] = 0;
         memcpy(&tracks[j].duration_ms, &buffer[i], sizeof(tracks[j].duration_ms));
         i += sizeof(tracks[j].duration_ms);
+        memcpy(tracks[j].spotify_artist_id, &buffer[i], 22);
+        i += 22;
+        tracks[j].spotify_artist_id[22] = 0;
         tracks[j].spotify_name = strdup(&buffer[i]);
         i += strlen(tracks[j].spotify_name) + 1;
         tracks[j].spotify_name_escaped = urlencode(tracks[j].spotify_name);
@@ -737,6 +770,11 @@ void
 read_playlist_info_from_file(const char *path, PlaylistInfo *playlistOut) {
     FILE *fp = fopen(path, "r");
 
+    if (!fp) {
+        fprintf(stderr, "[spotify] Error when saving playlist to file: %s\n", strerror(errno));
+        return;
+    }
+
     size_t size = 0;
     fread(&size, sizeof(size), 1, fp);
     char *buffer = malloc(size);
@@ -745,6 +783,7 @@ read_playlist_info_from_file(const char *path, PlaylistInfo *playlistOut) {
     fclose(fp);
 
     size_t i = 0;
+    playlistOut->not_empty = true;
     playlistOut->album = buffer[i++];
     memcpy(&playlistOut->last_played, &buffer[i], sizeof(playlistOut->last_played));
     i += sizeof(playlistOut->last_played);
@@ -814,8 +853,8 @@ get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *countOut) {
 }
 
 int
-get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **seed_genres, size_t genre_count,
-                    size_t limit, Track **tracksOut, size_t *track_count) {
+get_recommendations(char **seed_tracks, size_t seed_track_count, char **seed_artists, size_t seed_artist_count,
+                    char **seed_genres, size_t genre_count, size_t limit, Track **tracksOut, size_t *track_count) {
     ensure_token();
     printf("[spotify] Getting recommendations\n");
 
@@ -827,10 +866,9 @@ get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **se
     char *url = malloc((89 + 23 * 5 * 2 + genre_count * 12 /*Probably big enough for genres*/) *
                        sizeof(char)); //Might be too big but thats fine
     memcpy(url, recommendations_base_url, recommendations_base_url_len);
-    char *urlb = url;
+    char *urlb = url + recommendations_base_url_len;
     bool first = true;
-    for (int i = 0; seed_tracks && i < 5; ++i) {
-        if (!seed_tracks[i])continue;
+    for (int i = 0; seed_tracks && i < seed_track_count; ++i) {
         if (!first) {
             *urlb++ = ',';
         }
@@ -841,8 +879,7 @@ get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **se
     memcpy(urlb, recommendations_seed_artists, recommendations_seed_artists_len);
     urlb += recommendations_seed_artists_len;
     first = true;
-    for (int i = 0; seed_artists && i < 5; ++i) {
-        if (!seed_artists[i])continue;
+    for (int i = 0; seed_artists && i < seed_artist_count; ++i) {
         if (!first) {
             *urlb++ = ',';
         }
@@ -853,7 +890,7 @@ get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **se
     memcpy(urlb, recommendations_seed_genre, recommendations_seed_genre_len);
     urlb += recommendations_seed_genre_len;
     first = true;
-    for (int i = 0; seed_genres && i < (genre_count > 5 ? 5 : genre_count); ++i) {
+    for (int i = 0; i < genre_count; ++i) {
         if (!seed_genres[i])continue;
         if (!first) {
             *urlb++ = ',';
@@ -907,13 +944,56 @@ get_recommendations(char seed_tracks[23][5], char seed_artists[23][5], char **se
         tracks[i].artist = strdup(
                 cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
         sanitize(&tracks[i].artist);
+        memcpy(tracks[i].spotify_artist_id,
+               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
+               SPOTIFY_ID_LEN_NULL);
         tracks[i].artist_escaped = urlencode(tracks[i].artist);
         tracks[i].spotify_album_art = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(
                 cJSON_GetObjectItem(track, "album"), "images"), 0), "url")->valuestring);
         tracks[i].download_state = DS_NOT_DOWNLOADED;
+        (*tracksOut)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
         i++;
     }
     cJSON_Delete(root);
     printf("[spotify] Done getting recommendations\n");
     return 0;
+}
+
+int
+get_recommendations_from_tracks(Track *tracks, size_t track_count, size_t limit, Track **tracksOut,
+                                size_t *track_count_out) {
+    char **seed_tracks = calloc(5, sizeof(*seed_tracks)); //Last 5 tracks
+    char **seed_artists = calloc(5, sizeof(*seed_artists));
+    struct ArtistQuantity *artists = calloc(track_count, sizeof(*artists));
+    for (int i = 0; i < track_count; ++i) {
+        for (int j = 0; j < track_count; ++j) {
+            if (strcmp(tracks[i].spotify_artist_id, artists[j].id)) continue;
+            artists[j].appearances++;
+            goto end_loop;
+        }
+        memcpy(artists[i].id, tracks[i].spotify_artist_id, SPOTIFY_ID_LEN_NULL);
+        artists[i].appearances = 1;
+        end_loop:;
+    }
+    qsort(artists, track_count, sizeof(*artists), compare_artist_quantities);
+    size_t artist_count = 0;
+    for (int i = 0; i < track_count; ++i) {
+        if (artists[i].appearances)artist_count++;
+        if (artist_count >= 3)break; //Don't need more than 3
+    }
+    for (int i = 0; i < artist_count; ++i) {
+        seed_artists[i] = malloc(SPOTIFY_ID_LEN_NULL);
+        memcpy(seed_artists[i], artists[i].id, SPOTIFY_ID_LEN_NULL);
+        seed_artists[i][SPOTIFY_ID_LEN] = 0;
+        printf("[spotify] Using artist: %s\n", artists[i].id);
+    }
+    size_t track_amount = track_count >= 5 - artist_count ? 5 - artist_count : track_count;
+    for (int i = 0; i < track_amount; ++i) {
+        seed_tracks[i] = malloc(SPOTIFY_ID_LEN_NULL);
+        memcpy(seed_tracks[i], tracks[track_count - (i + 1)].spotify_id, SPOTIFY_ID_LEN_NULL);
+        seed_tracks[i][SPOTIFY_ID_LEN] = 0;
+        printf("[spotify] Using track: %s\n", tracks[track_count - (i + 1)].spotify_id);
+    }
+    return get_recommendations(seed_tracks, track_amount, seed_artists, artist_count, NULL, 0, limit, tracksOut,
+                               track_count_out);
 }

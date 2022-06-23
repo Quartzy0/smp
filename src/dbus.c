@@ -144,9 +144,10 @@ void get_playlist_maybe(DBusMessageIter *iter) {
     DBusMessageIter bools;
     dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &bools);
 
-    dbus_message_iter_append_basic(&bools, DBUS_TYPE_BOOLEAN, &started);
+    bool value = started * cplaylist.not_empty;
+    dbus_message_iter_append_basic(&bools, DBUS_TYPE_BOOLEAN, &value);
 
-    get_playlist_dbus(&bools, (PlaylistInfo *) (started * (uint64_t) &cplaylist) /* No branching ;) */);
+    get_playlist_dbus(&bools, (PlaylistInfo *) (value * (uint64_t) &cplaylist) /* No branching ;) */);
     dbus_message_iter_close_container(iter, &bools);
 }
 

@@ -4,18 +4,18 @@
 #include <curl/curl.h>
 #include <stdbool.h>
 
-typedef struct Response{
-	char *data;
-	unsigned int size;
+typedef struct Response {
+    char *data;
+    unsigned int size;
 } Response;
 
-typedef enum LoopMode{
+typedef enum LoopMode {
     LOOP_MODE_NONE,
     LOOP_MODE_PLAYLIST,
     LOOP_MODE_TRACK
 } LoopMode;
 
-typedef enum ActionType{
+typedef enum ActionType {
     ACTION_NONE,
     ACTION_PLAY,
     ACTION_PAUSE,
@@ -32,13 +32,18 @@ typedef enum ActionType{
 } ActionType;
 
 //6yKMo95JkibE9tGN81dgFh
-typedef struct Action{
+typedef struct Action {
     ActionType type;
     union {
         char id[23]; // All spotify ids are 22 chars long (track, album and playlist ids) + 1 null byte
         int64_t position;
     };
 } Action;
+
+struct ArtistQuantity {
+    char id[23];
+    size_t appearances;
+};
 
 #define QUEUE_MAX 100
 
@@ -73,5 +78,12 @@ int compare_alphabetical_reverse(const void *a, const void *b);
 int compare_last_played(const void *a, const void *b);
 
 int compare_last_played_reverse(const void *a, const void *b);
+
+int compare_artist_quantities(const void *a, const void *b);
+
+//https://stackoverflow.com/a/49028514
+void rek_mkdir(const char *path);
+
+FILE *fopen_mkdir(const char *path, char *mode);
 
 #endif
