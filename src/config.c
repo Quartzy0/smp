@@ -15,7 +15,7 @@ char *playlist_save_path;
 size_t playlist_save_path_len;
 double initial_volume;
 
-const char config_home_suffix[] = "/.config/smp/smp.conf";
+const char config_home_suffix[] = "/.config/";
 const size_t config_home_suffix_len = sizeof(config_home_suffix) - 1;
 const char conf_file_suffix[] = "/smp/smp.conf";
 const size_t conf_file_suffix_len = sizeof(conf_file_suffix) - 1;

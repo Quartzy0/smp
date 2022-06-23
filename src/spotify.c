@@ -359,9 +359,9 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
     list = curl_slist_append(list, authHeader);
 
     //url: https://api.spotify.com/v1/playlists/<playlist_id>?fields=name,tracks_array.items.track.album.images,tracks_array.items.track.id,tracks_array.items.track.name,tracks_array.items.track.artists.name,tracks_array.items.track.uri
-    char *url = malloc((37 + 155 + strlen(playlistId) + 1) * sizeof(char));
-    snprintf(url, 37 + 155 + strlen(playlistId) + 1,
-             "https://api.spotify.com/v1/playlists/%s?fields=id,name,tracks_array.items.track.album.images,tracks_array.items.track.id,tracks_array.items.track.name,tracks_array.items.track.artists.name,tracks_array.items.track.uri,images",
+    char *url = malloc((253 + strlen(playlistId) + 1) * sizeof(char));
+    snprintf(url, 253 + strlen(playlistId) + 1,
+             "https://api.spotify.com/v1/playlists/%s?fields=id,name,tracks.items.track.album.images,tracks.items.track.id,tracks.items.track.name,tracks.items.track.artists.name,tracks.items.track.artists.id,tracks.items.track.uri,tracks.items.track.duration_ms,images",
              playlistId);
 
     Response response;
