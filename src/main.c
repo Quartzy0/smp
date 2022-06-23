@@ -123,7 +123,7 @@ download_checks(void *arg) {
                 if (a.type == ACTION_TRACK_OVER && loop_mode == LOOP_MODE_TRACK) {
                     //Do nothing
                 } else if (shuffle) {
-                    size_t newI = 0;
+                    size_t newI;
                     while ((newI = (size_t) (((float) track_count) *
                                              (((float) rand()) / ((float) RAND_MAX)))) != track_index &&
                            track_count > 1) {}

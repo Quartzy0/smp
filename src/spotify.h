@@ -55,8 +55,6 @@ int get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut)
 
 int get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut);
 
-void free_track(Track *track);
-
 void free_tracks(Track *track, size_t count);
 
 void free_playlist(PlaylistInfo *playlist);

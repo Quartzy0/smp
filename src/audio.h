@@ -23,15 +23,11 @@ int set_file(const char *filename);
 
 int start();
 
-void block();
-
 int stop();
 
 int pause();
 
 int play();
-
-void sleep_audio(int i);
 
 int clean_audio();
 

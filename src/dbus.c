@@ -22,8 +22,6 @@ sem_t state_change_lock;
 
 DBusError err;
 
-void get_mediaplayer(DBusMessage *pMessage, DBusConnection *pConnection, char *property);
-
 #define CHECK_TYPE(args, type) if (dbus_message_iter_get_arg_type(args)!=(type)){ fprintf(stderr, "[dbus] Invalid argument type\n");return; }
 
 int
@@ -58,7 +56,7 @@ init_dbus() {
 
 void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, int type) {
     // Get the string representation of this type
-    char type_string[2] = {type, '\0'};
+    char type_string[2] = {(char) type, '\0'};
 
     DBusMessageIter dict_entry, dict_val;
     // Create our entry in the dictionary
@@ -80,8 +78,8 @@ void add_dict_entry(DBusMessageIter *dict, char *attribute, void *attr_value, in
 
 // Adds one string/a{type} dictionary entry to dict
 void add_dict_entry_array(DBusMessageIter *dict, char *attribute, void **attr_value, int count, int type) {
-    char type_array[3] = {DBUS_TYPE_ARRAY, type, '\0'};
-    char type_str[2] = {type, '\0'};
+    char type_array[3] = {DBUS_TYPE_ARRAY, (char) type, '\0'};
+    char type_str[2] = {(char) type, '\0'};
     DBusMessageIter dict_entry, dict_val, arr_val;
     // Create our entry in the dictionary
     dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
@@ -109,7 +107,7 @@ void get_track_metadata(DBusMessageIter *iter, Track *track) {
              "/org/mpris/MediaPlayer2/smp/track/%s", track->spotify_id);
 
     add_dict_entry(&dict, "mpris:trackid", obj_path, DBUS_TYPE_OBJECT_PATH);
-    add_dict_entry(&dict, "mpris:length", (void *) (track->duration_ms * 1000), DBUS_TYPE_INT64);
+    add_dict_entry(&dict, "mpris:length", (void *) (uint64_t) (track->duration_ms * 1000), DBUS_TYPE_INT64);
     add_dict_entry(&dict, "mpris:artUrl", track->spotify_album_art, DBUS_TYPE_STRING);
     add_dict_entry_array(&dict, "xesam:artist", (void **) &track->artist, 1, DBUS_TYPE_STRING);
     add_dict_entry(&dict, "xesam:url", track->spotify_uri, DBUS_TYPE_STRING);
@@ -152,7 +150,7 @@ void get_playlist_maybe(DBusMessageIter *iter) {
     dbus_message_iter_close_container(iter, &bools);
 }
 
-void get_mediaplayer(DBusMessage *msg, DBusConnection *conn, char *property) {
+void get_mediaplayer(DBusMessage *msg, char *property) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -176,12 +174,16 @@ void get_mediaplayer(DBusMessage *msg, DBusConnection *conn, char *property) {
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "Identity")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "s", &var);
-        const char *value = "SpotifyDL";
+        const char *value = "smp";
         dbus_message_iter_append_basic(&var, DBUS_TYPE_STRING, &value);
     } else if (!strcmp(property, "SupportedUriSchemes")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "as", &var);
         const char *value = "spotify";
         dbus_message_iter_append_fixed_array(&var, DBUS_TYPE_STRING, value, 1);
+    } else if (!strcmp(property, "HasTrackList")) {
+        dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
+        bool value = true;
+        dbus_message_iter_append_fixed_array(&var, DBUS_TYPE_BOOLEAN, &value, 1);
     }
     dbus_message_iter_close_container(&reply_args, &var);
 
@@ -195,7 +197,7 @@ void get_mediaplayer(DBusMessage *msg, DBusConnection *conn, char *property) {
     dbus_message_unref(reply);
 }
 
-void get_mediaplayer_player(DBusMessage *msg, DBusConnection *conn, char *property) {
+void get_mediaplayer_player(DBusMessage *msg, char *property) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -298,7 +300,7 @@ void get_mediaplayer_player(DBusMessage *msg, DBusConnection *conn, char *proper
     dbus_message_unref(reply);
 }
 
-void get_mediaplayer_playlists(DBusMessage *msg, DBusConnection *conn, char *property) {
+void get_mediaplayer_playlists(DBusMessage *msg, char *property) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -347,7 +349,7 @@ void get_mediaplayer_playlists(DBusMessage *msg, DBusConnection *conn, char *pro
     dbus_message_unref(reply);
 }
 
-void get_mediaplayer_tracklist(DBusMessage *msg, DBusConnection *conn, char *property) {
+void get_mediaplayer_tracklist(DBusMessage *msg, char *property) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -402,7 +404,7 @@ void get_mediaplayer_tracklist(DBusMessage *msg, DBusConnection *conn, char *pro
     dbus_message_unref(reply);
 }
 
-void getall_mediaplayer(DBusMessage *msg, DBusConnection *conn) {
+void getall_mediaplayer(DBusMessage *msg) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -415,7 +417,10 @@ void getall_mediaplayer(DBusMessage *msg, DBusConnection *conn) {
     // Add dictionary entries claiming we don't have these capabilities
     add_dict_entry(&dict, "CanQuit", (void *) 1, DBUS_TYPE_BOOLEAN);
     add_dict_entry(&dict, "CanRaise", (void *) 0, DBUS_TYPE_BOOLEAN);
-    add_dict_entry(&dict, "HasTrackList", (void *) 0, DBUS_TYPE_BOOLEAN);
+    add_dict_entry(&dict, "HasTrackList", (void *) 1, DBUS_TYPE_BOOLEAN);
+    add_dict_entry(&dict, "CanSetFullscreen", (void *) 0, DBUS_TYPE_BOOLEAN);
+    add_dict_entry(&dict, "Fullscreen", (void *) 0, DBUS_TYPE_BOOLEAN);
+    add_dict_entry(&dict, "Identity", (void *) "smp", DBUS_TYPE_STRING);
     char *scheme = "spotify";
     add_dict_entry_array(&dict, "SupportedUriSchemes", (void **) &scheme, 1, DBUS_TYPE_STRING);
 
@@ -434,7 +439,7 @@ void getall_mediaplayer(DBusMessage *msg, DBusConnection *conn) {
 }
 
 // Tell about our capabilities, few as they are
-void getall_mediaplayer_player(DBusMessage *msg, DBusConnection *conn) {
+void getall_mediaplayer_player(DBusMessage *msg) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -506,7 +511,7 @@ void getall_mediaplayer_player(DBusMessage *msg, DBusConnection *conn) {
     dbus_message_unref(reply);
 }
 
-void getall_mediaplayer_playlists(DBusMessage *msg, DBusConnection *conn) {
+void getall_mediaplayer_playlists(DBusMessage *msg) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -545,7 +550,7 @@ void getall_mediaplayer_playlists(DBusMessage *msg, DBusConnection *conn) {
     dbus_message_unref(reply);
 }
 
-void getall_mediaplayer_tracklist(DBusMessage *msg, DBusConnection *conn) {
+void getall_mediaplayer_tracklist(DBusMessage *msg) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -781,7 +786,7 @@ int check_tracklist_command(DBusMessage *msg) {
         for (size_t i = 0; i < track_count; ++i) {
             for (size_t j = 0; j < len; ++j) {
                 const char *id = strrchr(objs[j], '/');
-                if (!id || strcmp(++id, tracks[i].spotify_id))continue;
+                if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
                 get_track_metadata(&arr, &tracks[i]);
             }
         }
@@ -808,7 +813,7 @@ int check_tracklist_command(DBusMessage *msg) {
         }
         for (size_t i = 0; i < track_count; ++i) {
             const char *id = strrchr(obj, '/');
-            if (!id || strcmp(++id, tracks[i].spotify_id))continue;
+            if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
             rear.type = ACTION_POSITION_ABSOLUTE;
             last_rear.position = (int64_t) i;
             sem_post(&state_change_lock);
@@ -827,7 +832,7 @@ void
 handle_message() {
     running = true;
     while (running) {
-        // non blocking read of the next available message
+        // non-blocking read of the next available message
         dbus_connection_read_write(conn, 0);
         DBusMessage *msg = dbus_connection_pop_message(conn);
 
@@ -837,7 +842,7 @@ handle_message() {
             continue;
         }
 
-        int ret = 0;
+        int ret;
         dbus_uint32_t serial = 0;
         // check this is a method call for the right interface & method
         if (dbus_message_is_method_call(msg, "org.freedesktop.DBus.Properties", "GetAll")) {
@@ -854,13 +859,13 @@ handle_message() {
                 dbus_message_iter_get_basic(&args, &param);
                 printf("[dbus] Status\n");
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
-                    getall_mediaplayer(msg, conn);
+                    getall_mediaplayer(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    getall_mediaplayer_player(msg, conn);
+                    getall_mediaplayer_player(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
-                    getall_mediaplayer_playlists(msg, conn);
+                    getall_mediaplayer_playlists(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {
-                    getall_mediaplayer_tracklist(msg, conn);
+                    getall_mediaplayer_tracklist(msg);
                 } else {
                     goto illegal_call;
                 }
@@ -886,13 +891,13 @@ handle_message() {
                 dbus_message_iter_get_basic(&args, &property);
                 printf("[dbus] Status\n");
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
-                    get_mediaplayer(msg, conn, property);
+                    get_mediaplayer(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    get_mediaplayer_player(msg, conn, property);
+                    get_mediaplayer_player(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
-                    get_mediaplayer_playlists(msg, conn, property);
+                    get_mediaplayer_playlists(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {
-                    get_mediaplayer_tracklist(msg, conn, property);
+                    get_mediaplayer_tracklist(msg, property);
                 } else {
                     goto illegal_call;
                 }

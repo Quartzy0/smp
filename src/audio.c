@@ -68,13 +68,9 @@ callback(const void *input, void *output, unsigned long frameCount, const PaStre
     for (size_t i = 0; i < num_read * p_data->info.channels; ++i) {
         out[i] = p_data->buffer[p_data->offset * p_data->info.channels + i] * volumeMultiplier;
     }
-    //memcpy(out, &(p_data->buffer[p_data->offset * p_data->info.channels]), num_read * p_data->info.channels *
-    //        sizeof(float));
+
     p_data->offset += num_read;
     offset = p_data->offset;
-
-    /* read directly into output buffer */
-//    num_read = sf_read_float(p_data->file, out, frameCount * p_data->info.channels);
 
     /*  If we couldn't read a full frameCount of samples we've reached EOF */
     if (num_read < frameCount) {
@@ -110,7 +106,6 @@ set_file(const char *filename) {
     }
     printf("[audio] Setting file to '%s'\n", filename);
     current_file = strdup(filename);
-    // Check if there is data in the buffer
 
     /* Open the soundfile */
     data.file = sf_open(filename, SFM_READ, &data.info);
@@ -122,7 +117,7 @@ set_file(const char *filename) {
     data.offset = 0;
     frames = data.info.frames;
     audio_samplerate = data.info.samplerate;
-//    data.buffer = malloc(data.info.frames * data.info.channels * sizeof(float));
+
     if (data.buffer_size<data.info.frames * data.info.channels * sizeof(float)){
         float *temp = realloc(data.buffer, data.info.frames * data.info.channels * sizeof(float));
         if (!temp){
@@ -174,22 +169,7 @@ int pause() {
     return 0;
 }
 
-void sleep_audio(int i) {
-    Pa_Sleep(i);
-}
-
-void block() {
-    /* Run until EOF is reached */
-    while (Pa_IsStreamActive(stream)) {
-        Pa_Sleep(100);
-    }
-}
-
 int stop() {
-    /* Close the soundfile */
-//    sf_close(data.file);
-//    free(data.buffer);
-//    data.buffer = NULL;
     status = 0;
     started = 0;
 

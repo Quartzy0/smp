@@ -133,8 +133,8 @@ search(const char *query, Track **tracks, size_t *count) {
     free(url);
 
     cJSON *result = cJSON_ParseWithLength(response.data, response.size);
-    cJSON *data = cJSON_GetObjectItem(result, "data");
-    cJSON *searchV2 = cJSON_GetObjectItem(data, "searchV2");
+    cJSON *data_global = cJSON_GetObjectItem(result, "data");
+    cJSON *searchV2 = cJSON_GetObjectItem(data_global, "searchV2");
     cJSON *tracksJson = cJSON_GetObjectItem(searchV2, "tracks");
     cJSON *tracksArray = cJSON_GetObjectItem(tracksJson, "items");
 
@@ -429,15 +429,6 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
 }
 
 void
-free_track(Track *track) {
-    free(track->spotify_name);
-    free(track->spotify_album_art);
-    free(track->spotify_name_escaped);
-    free(track->artist);
-    free(track);
-}
-
-void
 free_tracks(Track *track, size_t count) {
     for (int i = 0; i < count; ++i) {
         free(track[i].spotify_name);
@@ -476,7 +467,7 @@ download_async(void *arg) {
                              "-x",
                              "--no-keep-video", "--audio-format", "vorbis", "--output", p.output, "--paths",
                              track_save_path, p.url, NULL};
-        execvp(cmd[0], cmd);
+        execvp(cmd[0], (char * const*) cmd);
     }
     int status = 0;
     waitpid(pid, &status, 0);
@@ -486,6 +477,7 @@ download_async(void *arg) {
     free(p.output);
     free(p.url);
     free(arg);
+    return NULL;
 }
 
 void
@@ -531,7 +523,7 @@ download_track(Track *track, bool block) {
     cJSON_ArrayForEach(element, searchResults) {
         cJSON *type = cJSON_GetObjectItem(element, "type");
         if (!type || !cJSON_IsString(type) ||
-            (strcmp(type->valuestring, "video") && strcmp(type->valuestring, "shortVideo"))) {
+            (strcmp(type->valuestring, "video") != 0 && strcmp(type->valuestring, "shortVideo") != 0)) {
             continue;
         }
 
@@ -637,7 +629,7 @@ save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks) {
             (22 + 36 + 60 + 64 + 30 /*Estimated size of single track*/) * playlist->track_count;
     char *buffer = calloc(1, buffer_size); //Allocate more memory than will probably be needed just in case
     size_t i = sizeof(i); //Leave space to write the size of the buffer at the beginning
-    buffer[i++] = playlist->album;
+    buffer[i++] = (char) playlist->album;
     memcpy(&buffer[i], &playlist->last_played, sizeof(playlist->last_played));
     i += sizeof(playlist->last_played);
     memcpy(&buffer[i], playlist->name, strlen(playlist->name) + 1 /*Also copy null byte*/);
@@ -792,7 +784,6 @@ read_playlist_info_from_file(const char *path, PlaylistInfo *playlistOut) {
     playlistOut->image_url = strdup(&buffer[i]);
     i += strlen(playlistOut->image_url) + 1;
     memcpy(&playlistOut->track_count, &buffer[i], sizeof(playlistOut->track_count));
-    i += sizeof(playlistOut->track_count);
 
     free(buffer);
 }
@@ -887,7 +878,7 @@ get_recommendations(char **seed_tracks, size_t seed_track_count, char **seed_art
     memcpy(urlb, recommendations_seed_genre, recommendations_seed_genre_len);
     urlb += recommendations_seed_genre_len;
     first = true;
-    for (int i = 0; i < genre_count; ++i) {
+    for (int i = 0; seed_genres && i < genre_count; ++i) {
         if (!seed_genres[i])continue;
         if (!first) {
             *urlb++ = ',';
@@ -964,7 +955,7 @@ get_recommendations_from_tracks(Track *tracks, size_t track_count, size_t limit,
     struct ArtistQuantity *artists = calloc(track_count, sizeof(*artists));
     for (int i = 0; i < track_count; ++i) {
         for (int j = 0; j < track_count; ++j) {
-            if (strcmp(tracks[i].spotify_artist_id, artists[j].id)) continue;
+            if (strcmp(tracks[i].spotify_artist_id, artists[j].id) != 0) continue;
             artists[j].appearances++;
             goto end_loop;
         }
