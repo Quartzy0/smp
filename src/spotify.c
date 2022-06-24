@@ -507,7 +507,7 @@ download_track(Track *track, bool block) {
     char *url = malloc(
             (49 + strlen(instance) + +strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1) *
             sizeof(char));
-    snprintf(url, 49 + strlen(instance) + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped),
+    snprintf(url, 49 + strlen(instance) + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1,
              "%s/api/v1/search?q=%s%%20%s&sort_by=relevance&type=video",
              instance, track->artist_escaped, track->spotify_name_escaped);
 
@@ -551,11 +551,11 @@ download_track(Track *track, bool block) {
     found:
     free(url);
     char *id = cJSON_GetObjectItem(element, "videoId")->valuestring;
-    char *videoUrl = malloc((9 + strlen(instance) + strlen(id)) * sizeof(char));
+    char *videoUrl = malloc((9 + strlen(instance) + strlen(id) + 1) * sizeof(char));
     memcpy(videoUrl, instance, strlen(instance));
     memcpy(videoUrl + strlen(instance), "/watch?v=", 9);
     memcpy(videoUrl + 9 + strlen(instance), id, strlen(id));
-    videoUrl[38 + strlen(id)] = 0;
+    videoUrl[9 + strlen(instance) + strlen(id)] = 0;
 
     cJSON_Delete(searchResults);
 
@@ -564,7 +564,7 @@ download_track(Track *track, bool block) {
     memcpy(output + strlen(track->spotify_id) * sizeof(char), exts_template, exts_template_len);
     output[strlen(track->spotify_id) + exts_template_len] = 0;
 
-    printf("[spotify] Found best match for '%s'. Downloading...\n", track->spotify_name);
+    printf("[spotify] Found best match for '%s'. Downloading from %s...\n", track->spotify_name, videoUrl);
 
     if (block) {
         char *cmd = malloc((137 + strlen(output) + track_save_path_len + strlen(videoUrl) + 1) * sizeof(char));
