@@ -6,7 +6,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include "config.h"
+#include "util.h"
 #include "confuse.h"
+#include "../lib/cjson/cJSON.h"
 
 uint32_t preload_amount;
 char *track_save_path;
@@ -14,6 +16,8 @@ size_t track_save_path_len;
 char *playlist_save_path;
 size_t playlist_save_path_len;
 double initial_volume;
+char **invidious_instances;
+size_t invidious_instance_count;
 
 const char config_home_suffix[] = "/.config/";
 const size_t config_home_suffix_len = sizeof(config_home_suffix) - 1;
@@ -39,7 +43,7 @@ load_config() {
     char *cache_home_env = getenv("XDG_CACHE_HOME");
     char *cache_home = NULL;
     if (!cache_home_env && home) {
-        cache_home = malloc(strlen(home) * sizeof(*home) + tracks_home_suffix_len);
+        cache_home = malloc(strlen(home) * sizeof(*home) + tracks_home_suffix_len + 1);
         memcpy(cache_home, home, strlen(home) * sizeof(*home));
         memcpy(cache_home + strlen(home) * sizeof(*home), tracks_home_suffix,
                tracks_home_suffix_len + 1 /* Also copy null byte */);
@@ -52,7 +56,7 @@ load_config() {
     char *data_home_env = getenv("XDG_DATA_HOME");
     char *data_home = NULL;
     if (!data_home_env && home) {
-        data_home = malloc(strlen(home) * sizeof(*home) + data_home_suffix_len);
+        data_home = malloc(strlen(home) * sizeof(*home) + data_home_suffix_len + 1);
         memcpy(data_home, home, strlen(home) * sizeof(*home));
         memcpy(data_home + strlen(home) * sizeof(*home), data_home_suffix,
                data_home_suffix_len + 1 /* Also copy null byte */);
@@ -68,6 +72,7 @@ load_config() {
                     CFG_STR("track_save_path", cache_home, CFGF_NONE),
                     CFG_STR("playlist_save_path", data_home, CFGF_NONE),
                     CFG_FLOAT("initial_volume", 0.1f, CFGF_NONE),
+                    CFG_STR_LIST("invidious_instances", NULL, CFGF_NONE),
                     CFG_END()
             };
 
@@ -84,13 +89,13 @@ load_config() {
         memcpy(config_home, home, strlen(home) * sizeof(*home));
         memcpy(config_home + strlen(home) * sizeof(*home), config_home_suffix,
                config_home_suffix_len + 1 /* Also copy null byte */);
-    }else{
+    } else {
         config_home = config_home_tmp;
     }
     char *config_file = malloc(strlen(config_home) * sizeof(*config_home) + conf_file_suffix_len + 1);
     memcpy(config_file, config_home, strlen(config_home) * sizeof(*config_home));
     memcpy(config_file + strlen(config_home) * sizeof(*config_home), conf_file_suffix, conf_file_suffix_len + 1);
-    if (config_home!=config_home_tmp) free(config_home);
+    if (config_home != config_home_tmp) free(config_home);
 
     if (cfg_parse(cfg, config_file) == CFG_PARSE_ERROR) {
         fprintf(stderr, "[config] Error when parsing config file.\n");
@@ -109,17 +114,17 @@ load_config() {
         return 1;
     }
     track_save_path_len = strlen(track_save_path_tmp);
-    if (track_save_path_tmp[track_save_path_len-1]!='/') {
+    if (track_save_path_tmp[track_save_path_len - 1] != '/') {
         appended_tracks = true;
         track_save_path = malloc(track_save_path_len + 2);
         memcpy(track_save_path, track_save_path_tmp, track_save_path_len);
         track_save_path[track_save_path_len] = '/';
         track_save_path[track_save_path_len + 1] = 0;
         track_save_path_len = strlen(track_save_path);
-    }else{
-        if (track_save_path_tmp!=cache_home) free(cache_home);
+    } else {
         track_save_path = track_save_path_tmp;
     }
+    if (track_save_path_tmp != cache_home) free(cache_home);
 
     char *playlist_save_path_tmp = cfg_getstr(cfg, "playlist_save_path");
     if (!playlist_save_path_tmp) {
@@ -128,26 +133,68 @@ load_config() {
         return 1;
     }
     playlist_save_path_len = strlen(playlist_save_path_tmp);
-    if (playlist_save_path_tmp[playlist_save_path_len-1]!='/'){
+    if (playlist_save_path_tmp[playlist_save_path_len - 1] != '/') {
         appended_playlists = true;
         playlist_save_path = malloc(playlist_save_path_len + 2);
         memcpy(playlist_save_path, playlist_save_path_tmp, playlist_save_path_len);
         playlist_save_path[playlist_save_path_len] = '/';
         playlist_save_path[playlist_save_path_len + 1] = 0;
         playlist_save_path_len = strlen(playlist_save_path);
-    }else{
-        if (playlist_save_path_tmp!=data_home) free(data_home);
+    } else {
         playlist_save_path = playlist_save_path_tmp;
     }
+    if (playlist_save_path_tmp != data_home) free(data_home);
+
     initial_volume = cfg_getfloat(cfg, "initial_volume");
+    if (cfg_size(cfg, "invidious_instances") == 0) {
+        Response res;
+        read_url("https://api.invidious.io/instances.json", &res, NULL);
+
+        if (!res.size) {
+            fprintf(stderr, "[config] Got empty response when trying to get invidious instances\n");
+            return 1;
+        }
+
+        cJSON *root = cJSON_ParseWithLength(res.data, res.size);
+        invidious_instances = calloc(cJSON_GetArraySize(root), sizeof(*invidious_instances));
+        size_t i = 0;
+        cJSON *element;
+        cJSON_ArrayForEach(element, root) {
+            if (cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "api")) &&
+                strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "type")->valuestring, "https") == 0) {
+                invidious_instances[i++] = strdup(
+                        cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "uri")->valuestring);
+            }
+        }
+        invidious_instance_count = i;
+        cJSON_Delete(root);
+    } else {
+        invidious_instance_count = cfg_size(cfg, "invidious_instances");
+        invidious_instances = calloc(invidious_instance_count, sizeof(*invidious_instances));
+        for (int i = 0; i < invidious_instance_count; ++i) {
+            invidious_instances[i] = strdup(cfg_getnstr(cfg, "invidious_instances", i));
+        }
+    }
     printf("[config] Loaded values from config:\n - preload_amount: %d\n - track_save_path: %s\n - playlist_save_path: %s\n - initial_volume: %f\n",
            preload_amount, track_save_path, playlist_save_path, initial_volume);
+    printf(" - invidious_instances: ");
+    for (int i = 0; i < invidious_instance_count; ++i) {
+        if (i != 0) {
+            printf(",");
+        }
+        printf("%s", invidious_instances[i]);
+    }
+    printf("\n");
     return 0;
 }
 
 void
-clean_config(){
+clean_config() {
     cfg_free(cfg);
     if (appended_playlists) free(playlist_save_path);
     if (appended_tracks) free(track_save_path);
+    for (int i = 0; i < invidious_instance_count; ++i) {
+        free(invidious_instances[i]);
+    }
+    free(invidious_instances);
 }

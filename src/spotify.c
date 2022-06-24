@@ -467,7 +467,7 @@ download_async(void *arg) {
                              "-x",
                              "--no-keep-video", "--audio-format", "vorbis", "--output", p.output, "--paths",
                              track_save_path, p.url, NULL};
-        execvp(cmd[0], (char * const*) cmd);
+        execvp(cmd[0], (char *const *) cmd);
     }
     int status = 0;
     waitpid(pid, &status, 0);
@@ -498,17 +498,20 @@ download_track(Track *track, bool block) {
 
     track->download_state = DS_DOWNLOADING;
 
-    printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching on youtube...\n", track->spotify_name,
+    printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching on invidious...\n", track->spotify_name,
            track->artist);
 
-    char *url = malloc((76 + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1) * sizeof(char));
-    snprintf(url, 76 + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped),
-             "https://yt.artemislena.eu/api/v1/search?q=%s%%20%s&sort_by=relevance&type=video",
-             track->artist_escaped, track->spotify_name_escaped);
+    int attempts = 3;
+    fetch:;
+    char *instance = random_invidious;
+    char *url = malloc(
+            (49 + strlen(instance) + +strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1) *
+            sizeof(char));
+    snprintf(url, 49 + strlen(instance) + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped),
+             "%s/api/v1/search?q=%s%%20%s&sort_by=relevance&type=video",
+             instance, track->artist_escaped, track->spotify_name_escaped);
 
     printf("[spotify] Searching with url: %s\n", url);
-    int attempts = 3;
-    fetch:
     attempts--;
     Response response;
     read_url(url, &response, NULL);
@@ -538,17 +541,20 @@ download_track(Track *track, bool block) {
         return;
     }
     fprintf(stderr,
-            "[spotify] No matching youtube video was found (very wierd). Trying again (%d retries left) (url: %s)\n",
+            "[spotify] No matching youtube video was found (very wierd). Trying again with different instance (%d retries left) (url: %s)\n",
             attempts, url);
     cJSON_Delete(searchResults);
+    free(url);
+    url = NULL;
     goto fetch;
 
     found:
     free(url);
     char *id = cJSON_GetObjectItem(element, "videoId")->valuestring;
-    char *videoUrl = malloc((38 + strlen(id)) * sizeof(char));
-    memcpy(videoUrl, "https://invidious.snopyta.org/watch?v=", 38);
-    memcpy(videoUrl + 38, id, strlen(id));
+    char *videoUrl = malloc((9 + strlen(instance) + strlen(id)) * sizeof(char));
+    memcpy(videoUrl, instance, strlen(instance));
+    memcpy(videoUrl + strlen(instance), "/watch?v=", 9);
+    memcpy(videoUrl + 9 + strlen(instance), id, strlen(id));
     videoUrl[38 + strlen(id)] = 0;
 
     cJSON_Delete(searchResults);
