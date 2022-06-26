@@ -8,12 +8,10 @@
 #include <string.h>
 #include <pthread.h>
 #include "../lib/cjson/cJSON.h"
-#include <linux/futex.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
 #include <errno.h>
 #include <dirent.h>
 #include "config.h"
+#include "invidous.h"
 
 char *authHeader;
 const char *searchUrl1 = "https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=%7B%22searchTerm%22%3A%22";
@@ -26,9 +24,6 @@ const char getTrackUrl1[] = "https://api-partner.spotify.com/pathfinder/v1/query
 const size_t getTrackUrl1Size = sizeof(getTrackUrl1) - 1;
 const char getTrackUrl2[] = "%22%7D&extensions=%7B%22persistedQuery%22%3A%7B%22version%22%3A1%2C%22sha256Hash%22%3A%22c1dba8d326cc06a6ebc960dabc4fd79fd73d774edaced6dc3fc5f9d9a6f7f64f%22%7D%7D";
 const size_t getTrackUrl2Size = sizeof(getTrackUrl2) - 1;
-
-const char *exts_template = ".%(ext)s";
-const size_t exts_template_len = 8;
 
 const char *track_ext = ".ogg";
 const size_t track_ext_len = 4;
@@ -358,7 +353,6 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
 
     list = curl_slist_append(list, authHeader);
 
-    //url: https://api.spotify.com/v1/playlists/<playlist_id>?fields=name,tracks_array.items.track.album.images,tracks_array.items.track.id,tracks_array.items.track.name,tracks_array.items.track.artists.name,tracks_array.items.track.uri
     char *url = malloc((253 + strlen(playlistId) + 1) * sizeof(char));
     snprintf(url, 253 + strlen(playlistId) + 1,
              "https://api.spotify.com/v1/playlists/%s?fields=id,name,tracks.items.track.album.images,tracks.items.track.id,tracks.items.track.name,tracks.items.track.artists.name,tracks.items.track.artists.id,tracks.items.track.uri,tracks.items.track.duration_ms,images",
@@ -452,36 +446,9 @@ free_playlist(PlaylistInfo *playlist) {
     memset(playlist, 0, sizeof(*playlist));
 }
 
-typedef struct DownloadParams {
-    Track *track;
-    char *output;
-    char *url;
-} DownloadParams;
-
-void *
-download_async(void *arg) {
-    DownloadParams p = *((DownloadParams *) arg);
-    pid_t pid = fork();
-    if (pid == 0) {
-        const char *cmd[] = {"yt-dlp", "--quiet", "--ppa", "Metadata:-metadata testing=Epicc", "--embed-metadata",
-                             "-x",
-                             "--no-keep-video", "--audio-format", "vorbis", "--output", p.output, "--paths",
-                             track_save_path, p.url, NULL};
-        execvp(cmd[0], (char *const *) cmd);
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    p.track->download_state = DS_DOWNLOADED;
-    printf("[spotify] Wake: %ld\n", syscall(SYS_futex, &p.track->download_state, FUTEX_WAKE, INT_MAX, NULL, 0, 0));
-    printf("[spotify] Download finished for '%s'\n", p.track->spotify_name);
-    free(p.output);
-    free(p.url);
-    free(arg);
-    return NULL;
-}
-
 void
 download_track(Track *track, bool block) {
+    if (track->download_state == DS_DOWNLOAD_FAILED) return;
     if (track->download_state == DS_DOWNLOADED) {
         printf("[spotify] Track '%s' already downloaded\n", track->spotify_name);
         return;
@@ -501,88 +468,15 @@ download_track(Track *track, bool block) {
     printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching on invidious...\n", track->spotify_name,
            track->artist);
 
-    int attempts = 3;
-    fetch:;
-    char *instance = random_invidious;
-    char *url = malloc(
-            (49 + strlen(instance) + +strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1) *
-            sizeof(char));
-    snprintf(url, 49 + strlen(instance) + strlen(track->spotify_name_escaped) + strlen(track->artist_escaped) + 1,
-             "%s/api/v1/search?q=%s%%20%s&sort_by=relevance&type=video",
-             instance, track->artist_escaped, track->spotify_name_escaped);
-
-    printf("[spotify] Searching with url: %s\n", url);
-    attempts--;
-    Response response;
-    read_url(url, &response, NULL);
-
-    if (!response.size) {
-        fprintf(stderr, "[spotify] Error when looking for song on youtube: empty response received\n");
-    }
-
-    cJSON *searchResults = cJSON_ParseWithLength(response.data, response.size);
-    cJSON *element;
-
-    cJSON_ArrayForEach(element, searchResults) {
-        cJSON *type = cJSON_GetObjectItem(element, "type");
-        if (!type || !cJSON_IsString(type) ||
-            (strcmp(type->valuestring, "video") != 0 && strcmp(type->valuestring, "shortVideo") != 0)) {
-            continue;
-        }
-
-        goto found;
-    }
-    if (!attempts) {
-        fprintf(stderr,
-                "[spotify] No matching youtube video was found (very wierd). Failed after 3 retries (url: %s)\n", url);
-        cJSON_Delete(searchResults);
-        track->download_state = DS_NOT_DOWNLOADED;
-        free(url);
-        return;
-    }
-    fprintf(stderr,
-            "[spotify] No matching youtube video was found (very wierd). Trying again with different instance (%d retries left) (url: %s)\n",
-            attempts, url);
-    cJSON_Delete(searchResults);
-    free(url);
-    url = NULL;
-    goto fetch;
-
-    found:
-    free(url);
-    char *id = cJSON_GetObjectItem(element, "videoId")->valuestring;
-    char *videoUrl = malloc((9 + strlen(instance) + strlen(id) + 1) * sizeof(char));
-    memcpy(videoUrl, instance, strlen(instance));
-    memcpy(videoUrl + strlen(instance), "/watch?v=", 9);
-    memcpy(videoUrl + 9 + strlen(instance), id, strlen(id));
-    videoUrl[9 + strlen(instance) + strlen(id)] = 0;
-
-    cJSON_Delete(searchResults);
-
-    char *output = malloc((strlen(track->spotify_id) + exts_template_len + 1) * sizeof(char));
-    memcpy(output, track->spotify_id, strlen(track->spotify_id) * sizeof(char));
-    memcpy(output + strlen(track->spotify_id) * sizeof(char), exts_template, exts_template_len);
-    output[strlen(track->spotify_id) + exts_template_len] = 0;
-
-    printf("[spotify] Found best match for '%s'. Downloading from %s...\n", track->spotify_name, videoUrl);
+    DownloadParams *params = malloc(sizeof(*params));
+    params->track = track;
+    params->path_out = track_save_path;
 
     if (block) {
-        char *cmd = malloc((137 + strlen(output) + track_save_path_len + strlen(videoUrl) + 1) * sizeof(char));
-        snprintf(cmd, (137 + strlen(output) + track_save_path_len + strlen(videoUrl) + 1) * sizeof(char),
-                 "yt-dlp --quiet --ppa \"Metadata:-metadata testing=Epicc\" --embed-metadata -x --no-keep-video --audio-format vorbis --output \"%s\" --paths %s \"%s\"",
-                 output, track_save_path, videoUrl);
-        system(cmd);
-        free(cmd);
-        track->download_state = DS_DOWNLOADED;
-        printf("[spotify] Wake: %ld\n", syscall(SYS_futex, &track->download_state, FUTEX_WAKE, INT_MAX, NULL, 0, 0));
-        printf("[spotify] Download finished for '%s'\n", track->spotify_name);
+        search_and_download(params);
     } else {
-        DownloadParams *p = malloc(sizeof(*p));
-        p->track = track;
-        p->output = output;
-        p->url = videoUrl;
         pthread_t t;
-        pthread_create(&t, NULL, download_async, p);
+        pthread_create(&t, NULL, search_and_download, params);
         pthread_detach(t);
     }
 }

@@ -17,7 +17,7 @@ extern double initial_volume;
 extern char **invidious_instances;
 extern size_t invidious_instance_count;
 
-#define random_invidious (invidious_instances[(int) (((float) rand()/(float) RAND_MAX) * (float) invidious_instance_count)])
+#define random_instance (invidious_instances[(int) (((float) rand()/(float) RAND_MAX) * (float) invidious_instance_count)])
 
 int load_config();
 

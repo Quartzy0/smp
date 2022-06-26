@@ -15,7 +15,8 @@
 typedef enum DownloadState {
     DS_NOT_DOWNLOADED,
     DS_DOWNLOADING,
-    DS_DOWNLOADED
+    DS_DOWNLOADED,
+    DS_DOWNLOAD_FAILED
 } DownloadState;
 
 typedef struct Track {

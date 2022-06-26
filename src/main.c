@@ -20,7 +20,7 @@ Track *next_tracks = NULL;
 size_t next_track_count = 0;
 pthread_t prepare_thread;
 
-struct RecommendationParams{
+struct RecommendationParams {
     Track *tracks;
     size_t track_count;
     Track **next_tracks;
@@ -32,8 +32,10 @@ prepare_recommendations(void *userp) {
     struct RecommendationParams *params = (struct RecommendationParams *) userp;
     printf("[ctrl - recommendations] Looking for recommendations\n");
     next_track_count = -1;
-    get_recommendations_from_tracks(params->tracks, params->track_count, 30, params->next_tracks, params->next_track_count);
-    printf("[ctrl - recommendations] Done. Wake: %ld\n", syscall(SYS_futex, &next_track_count, FUTEX_WAKE, INT_MAX, NULL, 0, 0));
+    get_recommendations_from_tracks(params->tracks, params->track_count, 30, params->next_tracks,
+                                    params->next_track_count);
+    printf("[ctrl - recommendations] Done. Wake: %ld\n",
+           syscall(SYS_futex, &next_track_count, FUTEX_WAKE, INT_MAX, NULL, 0, 0));
     free(params);
     return NULL;
 }
@@ -45,20 +47,20 @@ redo_audio() {
         Track *track = NULL;
         if (track_index + i >= track_count) {
             if (loop_mode == LOOP_MODE_NONE) {
-                if (next_track_count == 0){
+                if (next_track_count == 0) {
                     struct RecommendationParams *params = malloc(sizeof(*params));
                     params->next_tracks = &next_tracks;
                     params->next_track_count = &next_track_count;
                     params->tracks = tracks;
                     params->track_count = track_count;
                     pthread_create(&prepare_thread, NULL, prepare_recommendations, params);
-                }else if (next_track_count != -1){
+                } else if (next_track_count != -1) {
                     track = &next_tracks[(track_index + i) - track_count];
                     goto loop;
                 }
             }
             break;
-        }else{
+        } else {
             track = &tracks[track_index + i];
         }
         loop:
@@ -71,6 +73,12 @@ redo_audio() {
             }
         }
         download_track(track, !i);
+    }
+    if (tracks[track_index].download_state ==
+        DS_DOWNLOAD_FAILED) { //Go to next track if this track couldn't be downloaded
+        rear.type = ACTION_POSITION_RELATIVE;
+        last_rear.position = 1;
+        sem_post(&state_change_lock);
     }
     printf("[ctrl] Playing '%s' by %s\n", tracks[track_index].spotify_name,
            tracks[track_index].artist);
@@ -178,9 +186,11 @@ download_checks(void *arg) {
                             break;
                         }
                         //Continue playing recommendations
-                        if (next_track_count==0){
-                            if (get_recommendations_from_tracks(tracks, track_count, 30, &next_tracks, &next_track_count)) break;
-                        }else if (next_track_count==-1){
+                        if (next_track_count == 0) {
+                            if (get_recommendations_from_tracks(tracks, track_count, 30, &next_tracks,
+                                                                &next_track_count))
+                                break;
+                        } else if (next_track_count == -1) {
                             while (next_track_count == -1) {
                                 printf("[ctrl] Sleep sleep... (recommendations)\n");
                                 if (syscall(SYS_futex, &next_track_count, FUTEX_WAIT, -1, NULL,
