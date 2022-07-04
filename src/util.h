@@ -10,9 +10,10 @@ typedef struct Response {
 } Response;
 
 typedef enum LoopMode {
-    LOOP_MODE_NONE,
+    LOOP_MODE_NONE = 0,
     LOOP_MODE_PLAYLIST,
-    LOOP_MODE_TRACK
+    LOOP_MODE_TRACK,
+    LOOP_MODE_LAST
 } LoopMode;
 
 typedef enum ActionType {

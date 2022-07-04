@@ -220,6 +220,7 @@ track_by_id(const char *id, Track **track) {
         return 1;
     }
 
+    (*track) = malloc(sizeof(**track));
     memcpy((*track)->spotify_id, cJSON_GetObjectItem(trackJson, "id")->valuestring, 23);
     (*track)->spotify_name = strdup(cJSON_GetObjectItem(trackJson, "name")->valuestring);
     sanitize(&(*track)->spotify_name);
@@ -243,7 +244,7 @@ track_by_id(const char *id, Track **track) {
             cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(element, "artist"), "profile"),
                                 "name")->valuestring);
     char *artist_uri = strdup(cJSON_GetObjectItem(cJSON_GetObjectItem(element, "artist"), "uri")->valuestring);
-    memcpy((*track)->spotify_artist_id, strrchr(artist_uri, ':'), SPOTIFY_ID_LEN_NULL);
+    memcpy((*track)->spotify_artist_id, strrchr(artist_uri, ':')+1, SPOTIFY_ID_LEN_NULL);
     sanitize(&(*track)->artist);
     (*track)->artist_escaped = urlencode((*track)->artist);
 
@@ -266,6 +267,7 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
     }
 
     printf("[spotify] Getting info for album %s\n", albumId);
+    redo:;
     struct curl_slist *list = NULL;
 
     list = curl_slist_append(list, authHeader);
@@ -289,8 +291,15 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
     cJSON *root = cJSON_ParseWithLength(response.data, response.size);
 
     if (cJSON_HasObjectItem(root, "error")) {
-        fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", cJSON_GetObjectItem(
-                cJSON_GetObjectItem(root, "error"), "message")->valuestring);
+        char *error = cJSON_GetObjectItem(
+                cJSON_GetObjectItem(root, "error"), "message")->valuestring;
+        if(!strcmp(error, "The access token expired")){
+            get_token();
+            cJSON_Delete(root);
+            free(file);
+            goto redo;
+        }
+        fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", error);
         cJSON_Delete(root);
         free(file);
         return 1;
@@ -349,6 +358,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
     }
 
     printf("[spotify] Getting playlist info for playlist %s\n", playlistId);
+    redo:;
     struct curl_slist *list = NULL;
 
     list = curl_slist_append(list, authHeader);
@@ -372,8 +382,15 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
     cJSON *root = cJSON_ParseWithLength(response.data, response.size);
 
     if (cJSON_HasObjectItem(root, "error")) {
-        fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", cJSON_GetObjectItem(
-                cJSON_GetObjectItem(root, "error"), "message")->valuestring);
+        char *error = cJSON_GetObjectItem(
+                cJSON_GetObjectItem(root, "error"), "message")->valuestring;
+        if(!strcmp(error, "The access token expired")){
+            get_token();
+            cJSON_Delete(root);
+            free(file);
+            goto redo;
+        }
+        fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", error);
         cJSON_Delete(root);
         free(file);
         return 1;
@@ -795,24 +812,36 @@ get_recommendations(char **seed_tracks, size_t seed_track_count, char **seed_art
 
     printf("[spotify] Fetching recommendations using url: %s\n", url);
 
+    redo:;
     Response response;
     read_url(url, &response, list);
-    free(url);
-    curl_slist_free_all(list);
 
     if (!response.size) {
         fprintf(stderr, "[spotify] Got empty response when trying to get recommendations\n");
+        free(url);
+        curl_slist_free_all(list);
         return 1;
     }
 
     cJSON *root = cJSON_ParseWithLength(response.data, response.size);
 
     if (cJSON_HasObjectItem(root, "error")) {
+        char *error = cJSON_GetObjectItem(
+                cJSON_GetObjectItem(root, "error"), "message")->valuestring;
+        if(!strcmp(error, "The access token expired")){
+            get_token();
+            cJSON_Delete(root);
+            goto redo;
+        }
+        free(url);
+        curl_slist_free_all(list);
         fprintf(stderr, "[spotify] Error occurred when trying to get recommendations: %s\n", cJSON_GetObjectItem(
                 cJSON_GetObjectItem(root, "error"), "message")->valuestring);
         cJSON_Delete(root);
         return 1;
     }
+    free(url);
+    curl_slist_free_all(list);
     cJSON *tracks_array = cJSON_GetObjectItem(root, "tracks");
     *track_count = cJSON_GetArraySize(tracks_array);
     *tracksOut = malloc(*track_count * sizeof(**tracksOut));
