@@ -16,8 +16,10 @@ size_t track_save_path_len;
 char *playlist_save_path;
 size_t playlist_save_path_len;
 double initial_volume;
-char **invidious_instances;
-size_t invidious_instance_count;
+char **piped_api_instances;
+size_t piped_api_instance_count;
+char **download_instances;
+size_t download_instance_count;
 
 const char config_home_suffix[] = "/.config/";
 const size_t config_home_suffix_len = sizeof(config_home_suffix) - 1;
@@ -72,7 +74,8 @@ load_config() {
                     CFG_STR("track_save_path", cache_home, CFGF_NONE),
                     CFG_STR("playlist_save_path", data_home, CFGF_NONE),
                     CFG_FLOAT("initial_volume", 0.1f, CFGF_NONE),
-                    CFG_STR_LIST("invidious_instances", NULL, CFGF_NONE),
+                    CFG_STR_LIST("piped_api_instances", NULL, CFGF_NONE),
+                    CFG_STR_LIST("download_instances", NULL, CFGF_NONE),
                     CFG_END()
             };
 
@@ -146,43 +149,91 @@ load_config() {
     if (playlist_save_path_tmp != data_home) free(data_home);
 
     initial_volume = cfg_getfloat(cfg, "initial_volume");
-    if (cfg_size(cfg, "invidious_instances") == 0) {
+
+    if (cfg_size(cfg, "piped_api_instances") == 0) {
+        Response res;
+        read_url("https://piped-instances.kavin.rocks/", &res, NULL);
+
+        if (!res.size) {
+            fprintf(stderr,
+                    "[config] Got empty response when trying to get piped instances. Defaulting to https://pipedapi.kavin.rocks\n");
+            piped_api_instance_count = 1;
+            piped_api_instances = calloc(piped_api_instance_count, sizeof(*piped_api_instances));
+            piped_api_instances[0] = strdup("https://pipedapi.kavin.rocks");
+            goto download_instances_part;
+        }
+
+        cJSON *root = cJSON_ParseWithLength(res.data, res.size);
+        piped_api_instances = calloc(cJSON_GetArraySize(root), sizeof(*piped_api_instances));
+        size_t i = 0;
+        cJSON *element;
+        cJSON_ArrayForEach(element, root) {
+            piped_api_instances[i++] = strdup(cJSON_GetObjectItem(element, "api_url")->valuestring);
+        }
+        piped_api_instance_count = i;
+        free(res.data);
+        cJSON_Delete(root);
+    } else {
+        piped_api_instance_count = cfg_size(cfg, "piped_api_instances");
+        piped_api_instances = calloc(piped_api_instance_count, sizeof(*piped_api_instances));
+        for (int i = 0; i < piped_api_instance_count; ++i) {
+            piped_api_instances[i] = strdup(cfg_getnstr(cfg, "piped_api_instances", i));
+        }
+    }
+
+    download_instances_part:
+    if (cfg_size(cfg, "download_instances") == 0) {
         Response res;
         read_url("https://api.invidious.io/instances.json", &res, NULL);
 
         if (!res.size) {
-            fprintf(stderr, "[config] Got empty response when trying to get invidious instances\n");
-            return 1;
+            fprintf(stderr,
+                    "[config] Got empty response when trying to get invidious instances. Defaulting to https://yewtu.be\n");
+            download_instance_count = 1;
+            download_instances = calloc(download_instance_count, sizeof(*download_instances));
+            download_instances[0] = strdup("https://yewtu.be");
+            free(res.data);
+            goto end_config;
         }
 
         cJSON *root = cJSON_ParseWithLength(res.data, res.size);
-        invidious_instances = calloc(cJSON_GetArraySize(root), sizeof(*invidious_instances));
+        download_instances = calloc(cJSON_GetArraySize(root), sizeof(*download_instances));
         size_t i = 0;
         cJSON *element;
         cJSON_ArrayForEach(element, root) {
-            if (cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "api")) &&
-                strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "type")->valuestring, "https") == 0) {
-                invidious_instances[i++] = strdup(
+            if (strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "type")->valuestring, "https") == 0) {
+                download_instances[i++] = strdup(
                         cJSON_GetObjectItem(cJSON_GetArrayItem(element, 1), "uri")->valuestring);
             }
         }
-        invidious_instance_count = i;
+        download_instance_count = i;
+        free(res.data);
         cJSON_Delete(root);
     } else {
-        invidious_instance_count = cfg_size(cfg, "invidious_instances");
-        invidious_instances = calloc(invidious_instance_count, sizeof(*invidious_instances));
-        for (int i = 0; i < invidious_instance_count; ++i) {
-            invidious_instances[i] = strdup(cfg_getnstr(cfg, "invidious_instances", i));
+        download_instance_count = cfg_size(cfg, "download_instances");
+        download_instances = calloc(download_instance_count, sizeof(*download_instances));
+        for (int i = 0; i < download_instance_count; ++i) {
+            download_instances[i] = strdup(cfg_getnstr(cfg, "download_instances", i));
         }
     }
+
+    end_config:
     printf("[config] Loaded values from config:\n - preload_amount: %d\n - track_save_path: %s\n - playlist_save_path: %s\n - initial_volume: %f\n",
            preload_amount, track_save_path, playlist_save_path, initial_volume);
-    printf(" - invidious_instances: ");
-    for (int i = 0; i < invidious_instance_count; ++i) {
+    printf(" - piped_api_instances: ");
+    for (int i = 0; i < piped_api_instance_count; ++i) {
         if (i != 0) {
             printf(",");
         }
-        printf("%s", invidious_instances[i]);
+        printf("%s", piped_api_instances[i]);
+    }
+    printf("\n");
+    printf(" - download_instances: ");
+    for (int i = 0; i < download_instance_count; ++i) {
+        if (i != 0) {
+            printf(",");
+        }
+        printf("%s", download_instances[i]);
     }
     printf("\n");
     return 0;
@@ -193,8 +244,12 @@ clean_config() {
     cfg_free(cfg);
     if (appended_playlists) free(playlist_save_path);
     if (appended_tracks) free(track_save_path);
-    for (int i = 0; i < invidious_instance_count; ++i) {
-        free(invidious_instances[i]);
+    for (int i = 0; i < piped_api_instance_count; ++i) {
+        free(piped_api_instances[i]);
     }
-    free(invidious_instances);
+    free(piped_api_instances);
+    for (int i = 0; i < download_instance_count; ++i) {
+        free(download_instances[i]);
+    }
+    free(download_instances);
 }

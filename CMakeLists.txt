@@ -10,7 +10,7 @@ include_directories(/usr/include/dbus-1.0)
 include_directories(/usr/lib/x86_64-linux-gnu/dbus-1.0/include)
 include_directories(include)
 
-add_executable(smp src/main.c src/spotify.c src/util.c src/spotify.h src/util.h src/audio.c src/audio.h src/dbus.c src/dbus.h src/config.c src/config.h src/invidous.c src/invidous.h src/dbus-client.c src/dbus-client.h)
+add_executable(smp src/main.c src/spotify.c src/util.c src/spotify.h src/util.h src/audio.c src/audio.h src/dbus.c src/dbus.h src/config.c src/config.h src/downloader.c src/downloader.h src/dbus-client.c src/dbus-client.h)
 
 add_subdirectory(lib/cjson EXCLUDE_FROM_ALL)
 

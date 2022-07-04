@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include "config.h"
-#include "invidous.h"
+#include "downloader.h"
 
 char *authHeader;
 const char *searchUrl1 = "https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=%7B%22searchTerm%22%3A%22";
@@ -283,7 +283,7 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
     curl_slist_free_all(list);
 
     if (!response.size) {
-        fprintf(stderr, "[spotify] Got empty response when trying to get playlist info\n");
+        fprintf(stderr, "[spotify] Got empty response when trying to get album info\n");
         free(file);
         return 1;
     }
@@ -296,12 +296,10 @@ get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut) {
         if(!strcmp(error, "The access token expired")){
             get_token();
             cJSON_Delete(root);
-            free(file);
             goto redo;
         }
-        fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", error);
+        fprintf(stderr, "[spotify] Error occurred when trying to get album info: %s\n", error);
         cJSON_Delete(root);
-        free(file);
         return 1;
     }
 
@@ -387,12 +385,10 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
         if(!strcmp(error, "The access token expired")){
             get_token();
             cJSON_Delete(root);
-            free(file);
             goto redo;
         }
         fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", error);
         cJSON_Delete(root);
-        free(file);
         return 1;
     }
 
@@ -482,7 +478,7 @@ download_track(Track *track, bool block) {
 
     track->download_state = DS_DOWNLOADING;
 
-    printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching on invidious...\n", track->spotify_name,
+    printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching...\n", track->spotify_name,
            track->artist);
 
     DownloadParams *params = malloc(sizeof(*params));
