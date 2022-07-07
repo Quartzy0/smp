@@ -17,12 +17,12 @@ typedef enum PlaybackStatus{
 } PlaybackStatus;
 
 typedef struct Metadata{
-    const char *track_id;
+    char *track_id;
     int64_t length;
-    const char *art_url;
-    const char *artist;
-    const char *title;
-    const char *url;
+    char *art_url;
+    char *artist;
+    char *title;
+    char *url;
 } Metadata;
 
 typedef struct PlayerProperties{
@@ -61,6 +61,12 @@ void dbus_client_set_loop_mode(LoopMode mode);
 bool dbus_client_get_shuffle_mode();
 
 void dbus_client_set_shuffle_mode(bool mode);
+
+void dbus_client_tracklist_get_tracks(char ***out, int *count);
+
+int dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out);
+
+void free_metadata(Metadata *metadata);
 
 void print_properties(FILE *stream, PlayerProperties *properties);
 

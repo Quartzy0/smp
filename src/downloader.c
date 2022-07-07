@@ -29,7 +29,7 @@ search_and_download(void *userp) {
 
     int attempts = 3;
     search_part:
-    if (search_for_track(random_api_instance, &video_url, query)) {
+    if (search_for_track(random_api_instance, &video_url, query, params->track->spotify_name, params->track->artist)) {
         attempts--;
         if (attempts <= 0) {
             fprintf(stderr, "[downloader] Could not find result after 3 retries.\n");
@@ -60,7 +60,97 @@ search_and_download(void *userp) {
 }
 
 int
-search_for_track(char *instance, char **url_out, char *query) {
+find_match(cJSON *items, const char *title, const char *artist, float *score_out) {
+    char *ar_o = strdup(artist);
+    char *artist_words[100];
+    size_t artist_word_count = 0;
+    {
+        char *ar = strtok(ar_o, " ");
+        while (ar) {
+            artist_words[artist_word_count] = ar;
+            ar = strtok(NULL, " ");
+            artist_word_count++;
+        }
+    }
+
+    char *ti_o = strdup(title);
+    char *title_words[100];
+    size_t title_word_count = 0;
+    {
+        char *ti = strtok(ti_o, " ");
+        while (ti) {
+            title_words[title_word_count] = ti;
+            ti = strtok(NULL, " ");
+            title_word_count++;
+        }
+    }
+
+    float best_match_score = 0;
+    size_t best_match_index = 0;
+    size_t i = 0;
+    cJSON *element;
+    cJSON_ArrayForEach(element, items) {
+        float artist_score = 0;
+        float title_score = 0;
+        float score = 0;
+
+        {
+            size_t artist_match_count = 0;
+            size_t artist_in_words = 1;
+            char *artist_in = cJSON_GetObjectItem(element, "uploaderName")->valuestring;
+            char *ar = strtok(artist_in, " ");
+            while (ar) {
+                for (int j = 0; j < artist_word_count; ++j) {
+                    if (!strcasecmp(artist_words[j], ar)) {
+                        artist_match_count++;
+                        break;
+                    }
+                }
+                ar = strtok(NULL, " ");
+                if (ar)
+                    artist_in_words++;
+            }
+            artist_score = (float) artist_match_count / (float) artist_in_words;
+        }
+        {
+            size_t title_match_count = 0;
+            size_t title_in_words = 1;
+            char *title_in = cJSON_GetObjectItem(element, "title")->valuestring;
+            char *ti = strtok(title_in, " ");
+            while (ti) {
+                for (int j = 0; j < title_word_count; ++j) {
+                    if (!strcasecmp(title_words[j], ti)) {
+                        title_match_count++;
+                        break;
+                    }
+                }
+                ti = strtok(NULL, " ");
+                if (ti)
+                    title_in_words++;
+            }
+            title_score = (float) title_match_count / (float) title_in_words;
+        }
+        score = (title_score + artist_score) / 2.0f;
+
+
+        if (best_match_score < score) {
+            best_match_score = score;
+            best_match_index = i;
+        }
+        i++;
+    }
+    free(ar_o);
+    free(ti_o);
+
+    if (score_out) {
+        *score_out = best_match_score;
+    }
+
+    return (int) best_match_index;
+}
+
+int
+search_for_track(char *instance, char **url_out, char *query, char *title, char *artist) {
     char *url = malloc(
             (29 + strlen(instance) + strlen(query) + 1) *
             sizeof(char));
@@ -78,21 +168,29 @@ search_for_track(char *instance, char **url_out, char *query) {
         return 1;
     }
 
-    cJSON *searchResults = cJSON_ParseWithLength(response.data, response.size);
-    if (!cJSON_GetArraySize(searchResults)){
-        cJSON_Delete(searchResults);
-        free(response.data);
+    cJSON *root = cJSON_ParseWithLength(response.data, response.size);
+    cJSON *searchResults = cJSON_GetObjectItem(root, "items");
+    float music_score = 0.f;
+    int music_index = -1;
+    if (!cJSON_GetArraySize(searchResults)) {
         goto search_regular;
     }
-    cJSON *element = cJSON_GetArrayItem(cJSON_GetObjectItem(searchResults, "items"), 0);
+    music_index = find_match(searchResults, title, artist, &music_score);
+    if (music_score < 0.5f)
+        goto search_regular;
 
     free(url);
-    *url_out = strdup(cJSON_GetObjectItem(element, "url")->valuestring);
-    cJSON_Delete(searchResults);
+    *url_out = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(searchResults, music_index), "url")->valuestring);
+    cJSON_Delete(root);
     free(response.data);
     return 0;
 
-    search_regular:
+    search_regular:;
+    char *url_temp = NULL;
+    if (music_index != -1)
+        url_temp = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(searchResults, music_index), "url")->valuestring);
+    cJSON_Delete(root);
+    free(response.data);
     snprintf(url, 24 + strlen(instance) + strlen(query) + 1,
              "%s/search?q=%s&filter=videos",
              instance, query);
@@ -103,26 +201,37 @@ search_for_track(char *instance, char **url_out, char *query) {
     if (!response.size) {
         fprintf(stderr, "[downloader] Error when looking for song on instance: empty response received\n");
         free(url);
+        if (url_temp) free(url_temp);
         return 1;
     }
 
-    searchResults = cJSON_ParseWithLength(response.data, response.size);
+    root = cJSON_ParseWithLength(response.data, response.size);
+    searchResults = cJSON_GetObjectItem(root, "items");
 
-    if (!cJSON_GetArraySize(searchResults)){
+    float videos_score = 0.f;
+    int videos_index = find_match(searchResults, title, artist, &videos_score);
+
+    if (videos_score < 0.05f && music_score < 0.05f) {
         fprintf(stderr,
                 "[downloader] No matching youtube video was found (very wierd) (url: %s)\n",
                 url);
-        cJSON_Delete(searchResults);
+        cJSON_Delete(root);
         free(url);
         url = NULL;
         free(response.data);
+        free(url_temp);
         return 1;
     }
 
-    element = cJSON_GetArrayItem(searchResults, 0);
+    if (url_temp && music_score >= videos_score) {
+        *url_out = url_temp;
+    } else {
+        if (url_temp) free(url_temp);
+        *url_out = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(searchResults, videos_index), "url")->valuestring);
+    }
+
     free(url);
-    *url_out = strdup(cJSON_GetObjectItem(element, "url")->valuestring);
-    cJSON_Delete(searchResults);
+    cJSON_Delete(root);
     free(response.data);
     return 0;
 }

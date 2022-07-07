@@ -461,7 +461,7 @@ void getall_mediaplayer_player(DBusMessage *msg) {
     add_dict_entry_p(&dict, "MaximumRate", &value, DBUS_TYPE_DOUBLE);
     add_dict_entry_p(&dict, "Rate", &value, DBUS_TYPE_DOUBLE);
     // Add dictionary entry telling current playback status
-    add_dict_entry(&dict, "PlaybackStatus", (status ? "Playing" : "Paused"), DBUS_TYPE_STRING);
+    add_dict_entry(&dict, "PlaybackStatus", started ? (status ? "Playing" : "Paused") : "Stopped", DBUS_TYPE_STRING);
     switch (loop_mode) {
         case LOOP_MODE_NONE:
             add_dict_entry(&dict, "LoopStatus", "None", DBUS_TYPE_STRING);
@@ -701,7 +701,7 @@ int check_player_command(DBusMessage *msg) {
 }
 
 int check_playlist_command(DBusMessage *msg) {
-    if (dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.Playlists", "ActivatePlaylist")) {
+    if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "ActivatePlaylist")) {
         char *obj;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
@@ -715,7 +715,7 @@ int check_playlist_command(DBusMessage *msg) {
         memcpy(last_rear.id, &obj[objLen - 23], 22 * sizeof(char));
         last_rear.id[22] = 0;
         sem_post(&state_change_lock);
-    } else if (dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.Playlists", "GetPlaylists")) {
+    } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "GetPlaylists")) {
         uint32_t index, max_count;
         char *order;
         bool reverse_order;
@@ -768,7 +768,7 @@ int check_playlist_command(DBusMessage *msg) {
 }
 
 int check_tracklist_command(DBusMessage *msg) {
-    if (dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.TrackList", "GetTracksMetadata")) {
+    if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "GetTracksMetadata")) {
         size_t len = 20;
         char **objs = NULL;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_ARRAY, DBUS_TYPE_OBJECT_PATH, &objs, &len, DBUS_TYPE_INVALID)) {
@@ -802,7 +802,7 @@ int check_tracklist_command(DBusMessage *msg) {
         dbus_free_string_array(objs);
         dbus_message_unref(ret);
         return 2;
-    } else if (dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.TrackList", "GoTo")) {
+    } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "GoTo")) {
         char *obj = NULL;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
@@ -819,8 +819,8 @@ int check_tracklist_command(DBusMessage *msg) {
             sem_post(&state_change_lock);
             break;
         }
-    } else if (dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.TrackList", "RemoveTrack") ||
-               dbus_message_is_method_call(msg, "org.mprs.MediaPlayer2.TrackList", "AddTrack")) {
+    } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "RemoveTrack") ||
+               dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "AddTrack")) {
         return 1;
     } else {
         return 0;

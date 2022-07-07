@@ -12,37 +12,8 @@
 #include <unistd.h>
 #include <getopt.h>
 #include "config.h"
-#include "dbus-client.h"
+#include "cli.h"
 
-#define HELP_TEXT   ("Usage: smp [-dstpPbnov] [OPTIONS...]\n" \
-                    "\n"\
-                    "\t-d, --daemon\n"\
-                    "\t\tStart the music player service. This will not detach the process from the parent process.\n\n"\
-                    "\t-?, --help\n"\
-                    "\t\tShow this menu.\n\n"\
-                    "\t-s, --status\n"\
-                    "\t\tShow the player's status. This includes information about the track's title, artist, uri and"\
-                    " album art. Information about the player's mode is also show, like the volume, loop mode and shuffle status\n\n"\
-                    "\t-t, --toggle\n"\
-                    "\t\tToggle the current playback state. If the player is paused, it will start playing and if it is"\
-                    " playing it will pause. If the player is stopped and is not playing anything this will have no effect.\n\n"\
-                    "\t-p, --play\n"\
-                    "\t\tContinue playing the track. This will have no effect if the player is stopped.\n\n"\
-                    "\t-P, --pause\n"\
-                    "\t\tPause the current track. This will have no effect if the player is stopped.\n\n"\
-                    "\t-n, --next\n"\
-                    "\t\tWill play the next track in the playlist. The behaviour of this command varies based on the "\
-                    "loop/shuffle modes. If shuffle is enabled, it will not play the next track in the playlist but will"\
-                    " play a random one. It will also not play recommendations from spotify but will endlessly play songs from"\
-                    " the current playlist. If loop mode is set to track, it will still play the next track. If loop mode"\
-                    " is set to playlist, it will start playing the first track once the end is reached.\n\n"\
-                    "\t-b, --previous\n"\
-                    "\t\tThis option behaves the same way as the --next option, except it plays the previous track.\n\n"\
-                    "\t-o, --open\n"\
-                    "\t\tStarts playing the track/album/playlist described by the uri. The accepted uri scheme is "\
-                    "'spotify:<track/album/playlist>:<22 character id>'\n\n"\
-                    "\t-v, --volume\n"\
-                    "\t\tSet the volume. The volume goes from 1 to 0.\n\n")
 PlaylistInfo cplaylist;
 size_t track_index = -1;
 Track *tracks = NULL;
@@ -293,109 +264,9 @@ download_checks(void *arg) {
 }
 
 int main(int argc, char **argv) {
-    int c;
-
-    while (1) {
-        int option_index = 0;
-        static struct option long_options[] = {
-                {"daemon",   no_argument,       0, 'd'},
-                {"help",     no_argument,       0, '?'},
-                {"status",   no_argument,       0, 's'},
-                {"toggle",   no_argument,       0, 't'},
-                {"play",     no_argument,       0, 'p'},
-                {"pause",    no_argument,       0, 'P'},
-                {"next",     no_argument,       0, 'n'},
-                {"previous", no_argument,       0, 'b'},
-                {"open",     required_argument, 0, 'o'},
-                {"volume",   required_argument, 0, 'v'},
-                {"shuffle",  no_argument,       0, 'S'},
-                {"loop",     no_argument,       0, 'l'},
-                {0, 0,                          0, 0}
-        };
-
-        c = getopt_long(argc, argv, "d?stpPbno:v:Sl",
-                        long_options, &option_index);
-        if (c == -1)
-            break;
-
-        switch (c) {
-            case 'd':
-                printf("[smp] Starting as daemon\n");
-                goto player_section;
-            case 's':
-                init_dbus_client();
-                PlayerProperties s;
-                s.playback_status = 100;
-                if (get_player_properties(&s)) {
-                    fprintf(stderr, "[dbus-client] Error while getting player status\n");
-                    break;
-                }
-                print_properties(stdout, &s);
-                break;
-            case 't':
-                init_dbus_client();
-                dbus_client_pause_play();
-                break;
-            case 'p':
-                init_dbus_client();
-                dbus_client_play();
-                break;
-            case 'P':
-                init_dbus_client();
-                dbus_client_pause();
-                break;
-            case 'n':
-                init_dbus_client();
-                dbus_client_next();
-                break;
-            case 'b':
-                init_dbus_client();
-                dbus_client_previous();
-                break;
-            case 'o':
-                init_dbus_client();
-                dbus_client_open(optarg);
-                break;
-            case 'v':
-                init_dbus_client();
-                if (optarg) {
-                    char *end = NULL;
-                    double d = strtod(optarg, &end);
-                    dbus_client_set_volume(d);
-                }
-                printf("%lf\n", dbus_client_get_volume());
-                break;
-            case 'S':
-                init_dbus_client();
-                bool shuffle_mode = dbus_client_get_shuffle_mode();
-                dbus_client_set_shuffle_mode(!shuffle_mode);
-                printf("%s", shuffle_mode ? "false" : "true");
-                break;
-            case 'l':
-                init_dbus_client();
-                LoopMode loop_mode = dbus_client_get_loop_mode();
-                loop_mode = (loop_mode + 1) % LOOP_MODE_LAST;
-                dbus_client_set_loop_mode(loop_mode);
-                char *loop_mode_string = "None";
-                switch (loop_mode) {
-                    case LOOP_MODE_TRACK:
-                        loop_mode_string = "Track";
-                        break;
-                    case LOOP_MODE_PLAYLIST:
-                        loop_mode_string = "Playlist";
-                        break;
-                }
-                printf("%s\n", loop_mode_string);
-                break;
-            case '?':
-                printf(HELP_TEXT);
-                exit(EXIT_SUCCESS);
-            default:
-                printf("?? getopt returned character code 0%o ??\n", c);
-        }
+    if(handle_cli(argc, argv)){
+        return EXIT_SUCCESS;
     }
-
-    exit(EXIT_SUCCESS);
 
     player_section:
     if (load_config()) {

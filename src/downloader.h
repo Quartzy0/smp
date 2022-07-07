@@ -15,7 +15,7 @@ typedef struct DownloadParams {
 
 void *search_and_download(void *userp);
 
-int search_for_track(char *instance, char **id_out, char *query);
+int search_for_track(char *instance, char **url_out, char *query, char *title, char *artist);
 
 int download_from_id(char *instance, char *id, char *path_out_in, char *file_name);
 

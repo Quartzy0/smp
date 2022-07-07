@@ -78,6 +78,45 @@ init_dbus_client() {
     return 0;
 }
 
+void
+dbus_client_parse_metadata(Metadata *out, DBusMessageIter *val) {
+    DBusMessageIter arrIn, varIn, valIn;
+    dbus_message_iter_recurse(val, &arrIn);
+    int metadataCount = dbus_message_iter_get_element_count(val);
+    for (int j = 0; j < metadataCount; ++j) {
+        dbus_message_iter_recurse(&arrIn, &varIn);
+
+        char *metaEntryName = NULL;
+        dbus_message_iter_get_basic(&varIn, &metaEntryName);
+        dbus_message_iter_next(&varIn);
+        dbus_message_iter_recurse(&varIn, &valIn);
+
+        char *s;
+        if (!strcmp(metaEntryName, "mpris:trackid")) {
+            dbus_message_iter_get_basic(&valIn, &s);
+            out->track_id = strdup(s);
+        } else if (!strcmp(metaEntryName, "mpris:length")) {
+            dbus_message_iter_get_basic(&valIn, &out->length);
+        } else if (!strcmp(metaEntryName, "mpris:artUrl")) {
+            dbus_message_iter_get_basic(&valIn, &s);
+            out->art_url = strdup(s);
+        } else if (!strcmp(metaEntryName, "xesam:artist")) {
+            DBusMessageIter artistArr;
+            dbus_message_iter_recurse(&valIn, &artistArr);
+            dbus_message_iter_get_basic(&artistArr, &s);
+            out->artist = strdup(s);
+        } else if (!strcmp(metaEntryName, "xesam:title")) {
+            dbus_message_iter_get_basic(&valIn, &s);
+            out->title = strdup(s);
+        } else if (!strcmp(metaEntryName, "xesam:url")) {
+            dbus_message_iter_get_basic(&valIn, &s);
+            out->url = strdup(s);
+        }
+
+        dbus_message_iter_next(&arrIn);
+    }
+}
+
 int
 get_player_properties(PlayerProperties *properties) {
     DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
@@ -146,35 +185,7 @@ get_player_properties(PlayerProperties *properties) {
         } else if (!strcmp(name, "Position")) {
             dbus_message_iter_get_basic(&val, &properties->position);
         } else if (!strcmp(name, "Metadata")) {
-            DBusMessageIter arrIn, varIn, valIn;
-            dbus_message_iter_recurse(&val, &arrIn);
-            int metadataCount = dbus_message_iter_get_element_count(&val);
-            for (int j = 0; j < metadataCount; ++j) {
-                dbus_message_iter_recurse(&arrIn, &varIn);
-
-                char *metaEntryName = NULL;
-                dbus_message_iter_get_basic(&varIn, &metaEntryName);
-                dbus_message_iter_next(&varIn);
-                dbus_message_iter_recurse(&varIn, &valIn);
-
-                if (!strcmp(metaEntryName, "mpris:trackid")) {
-                    dbus_message_iter_get_basic(&valIn, &properties->metadata.track_id);
-                } else if (!strcmp(metaEntryName, "mpris:length")) {
-                    dbus_message_iter_get_basic(&valIn, &properties->metadata.length);
-                } else if (!strcmp(metaEntryName, "mpris:artUrl")) {
-                    dbus_message_iter_get_basic(&valIn, &properties->metadata.art_url);
-                } else if (!strcmp(metaEntryName, "xesam:artist")) {
-                    DBusMessageIter artistArr;
-                    dbus_message_iter_recurse(&valIn, &artistArr);
-                    dbus_message_iter_get_basic(&artistArr, &properties->metadata.artist);
-                } else if (!strcmp(metaEntryName, "xesam:title")) {
-                    dbus_message_iter_get_basic(&valIn, &properties->metadata.title);
-                } else if (!strcmp(metaEntryName, "xesam:url")) {
-                    dbus_message_iter_get_basic(&valIn, &properties->metadata.url);
-                }
-
-                dbus_message_iter_next(&arrIn);
-            }
+            dbus_client_parse_metadata(&properties->metadata, &val);
         }
         dbus_message_iter_next(&arr);
     }
@@ -288,6 +299,37 @@ dbus_client_set_property(const char *iface, const char *name, int type, void *va
 }
 
 int
+dbus_client_get_property_reply(const char *iface, const char *name, DBusMessage **reply) {
+    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
+                                                    "org.freedesktop.DBus.Properties", "Get");
+    dbus_message_append_args(msg,
+                             DBUS_TYPE_STRING, &iface,
+                             DBUS_TYPE_STRING, &name,
+                             DBUS_TYPE_INVALID);
+    dbus_uint32_t serial = 0;
+    dbus_connection_send(conn, msg, &serial);
+    dbus_message_unref(msg);
+
+    for (int j = 0; j < 5; ++j) { /* Get reply */
+        dbus_connection_read_write(conn, 0);
+        *reply = dbus_connection_pop_message(conn);
+
+        if (NULL == *reply) {
+            usleep(10000);
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    if (!*reply) {
+        fprintf(stderr, "[dbus-client] No message was received\n");
+        return 1;
+    }
+    return 0;
+}
+
+int
 dbus_client_get_property(const char *iface, const char *name, int type, void *value) {
     DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
                                                     "org.freedesktop.DBus.Properties", "Get");
@@ -321,8 +363,9 @@ dbus_client_get_property(const char *iface, const char *name, int type, void *va
     dbus_message_iter_init(reply, &iter);
     dbus_message_iter_recurse(&iter, &val);
     int type_got;
-    if((type_got = dbus_message_iter_get_arg_type(&val))!=type){
-        fprintf(stderr, "[dbus-client] Got unexpected type as response for option '%s' (expected '%c' got '%c')\n", name, type, type_got);
+    if ((type_got = dbus_message_iter_get_arg_type(&val)) != type) {
+        fprintf(stderr, "[dbus-client] Got unexpected type as response for option '%s' (expected '%c' got '%c')\n",
+                name, type, type_got);
         dbus_message_unref(reply);
         return 1;
     }
@@ -339,27 +382,27 @@ dbus_client_set_volume(double volume) {
 }
 
 double
-dbus_client_get_volume(){
+dbus_client_get_volume() {
     double v = 0.0;
     dbus_client_get_property("org.mpris.MediaPlayer2.Player", "Volume", DBUS_TYPE_DOUBLE, &v);
     return v;
 }
 
 LoopMode
-dbus_client_get_loop_mode(){
+dbus_client_get_loop_mode() {
     char *s = NULL;
     dbus_client_get_property("org.mpris.MediaPlayer2.Player", "LoopStatus", DBUS_TYPE_STRING, &s);
-    if (!strcmp(s, "None")){
+    if (!strcmp(s, "None")) {
         return LOOP_MODE_NONE;
-    }else if (!strcmp(s, "Track")){
+    } else if (!strcmp(s, "Track")) {
         return LOOP_MODE_TRACK;
-    }else{
+    } else {
         return LOOP_MODE_PLAYLIST;
     }
 }
 
 void
-dbus_client_set_loop_mode(LoopMode mode){
+dbus_client_set_loop_mode(LoopMode mode) {
     char *s = "None";
     switch (mode) {
         case LOOP_MODE_PLAYLIST:
@@ -376,16 +419,95 @@ dbus_client_set_loop_mode(LoopMode mode){
 }
 
 bool
-dbus_client_get_shuffle_mode(){
+dbus_client_get_shuffle_mode() {
     uint32_t s = 0;
     dbus_client_get_property("org.mpris.MediaPlayer2.Player", "Shuffle", DBUS_TYPE_BOOLEAN, &s);
     return (bool) s;
 }
 
 void
-dbus_client_set_shuffle_mode(bool mode){
+dbus_client_set_shuffle_mode(bool mode) {
     uint32_t s = mode;
     dbus_client_set_property("org.mpris.MediaPlayer2.Player", "Shuffle", DBUS_TYPE_BOOLEAN, (void *) &s);
+}
+
+void
+dbus_client_tracklist_get_tracks(char ***out, int *count) {
+    DBusMessage *reply = NULL;
+    dbus_client_get_property_reply("org.mpris.MediaPlayer2.TrackList", "Tracks", &reply);
+
+    DBusMessageIter iter, var, arr, val;
+    dbus_message_iter_init(reply, &iter);
+    dbus_message_iter_recurse(&iter, &var);
+    dbus_message_iter_recurse(&var, &arr);
+    *count = dbus_message_iter_get_element_count(&var);
+    *out = calloc(*count, sizeof(**out));
+    for (int i = 0; i < *count; ++i) {
+        char *path = NULL;
+        dbus_message_iter_get_basic(&arr, &path);
+        (*out)[i] = strdup(path);
+        dbus_message_iter_next(&arr);
+    }
+
+    dbus_message_unref(reply);
+}
+
+int
+dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out) {
+    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
+                                                    "org.mpris.MediaPlayer2.TrackList", "GetTracksMetadata");
+
+    {
+        DBusMessageIter iter, arr;
+        dbus_message_iter_init_append(msg, &iter);
+        dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, DBUS_TYPE_OBJECT_PATH_AS_STRING, &arr);
+        for (int i = 0; i < count; ++i) {
+            dbus_message_iter_append_basic(&arr, DBUS_TYPE_OBJECT_PATH, &(tracks[i]));
+        }
+        dbus_message_iter_close_container(&iter, &arr);
+    }
+
+    dbus_uint32_t serial = 0;
+    dbus_connection_send(conn, msg, &serial);
+    dbus_message_unref(msg);
+
+    DBusMessage *reply;
+    for (int j = 0; j < 5; ++j) { /* Get reply */
+        dbus_connection_read_write(conn, 0);
+        reply = dbus_connection_pop_message(conn);
+
+        if (NULL == reply) {
+            usleep(10000);
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    if (!reply) {
+        fprintf(stderr, "[dbus-client] No message was received\n");
+        return 1;
+    }
+
+    DBusMessageIter iter, arr;
+    dbus_message_iter_init(reply, &iter);
+    dbus_message_iter_recurse(&iter, &arr);
+    for (int i = 0; i < count; ++i) {
+        dbus_client_parse_metadata(&out[i], &arr);
+        dbus_message_iter_next(&arr);
+    }
+
+    dbus_message_unref(reply);
+    return 0;
+}
+
+void
+free_metadata(Metadata *metadata) {
+    free(metadata->track_id);
+    free(metadata->art_url);
+    free(metadata->artist);
+    free(metadata->title);
+    free(metadata->url);
 }
 
 void
@@ -413,6 +535,15 @@ print_properties(FILE *stream, PlayerProperties *properties) {
         case LOOP_MODE_TRACK:
             loop_status = "Track";
             break;
+    }
+    if (properties->playback_status == PBS_STOPPED) {
+        fprintf(stream, "Track info:\n");
+        fprintf(stream, "\tN/A (Player is stopped or hasn't been started)\n");
+        fprintf(stream, "Player info:\n");
+        fprintf(stream, "\tLooping: %s\n", loop_status);
+        fprintf(stream, "\tShuffle: %s\n", properties->shuffle ? "true" : "false");
+        fprintf(stream, "\tVolume: %lf\n", properties->volume);
+        return;
     }
     fprintf(stream, "Track info:\n");
     fprintf(stream, "\t%s %s\n", status_indicator, properties->metadata.title);

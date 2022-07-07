@@ -48,7 +48,8 @@ void get_token();
 
 void ensure_token();
 
-void search(const char *query, Track **tracks, size_t *count);
+int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
+           PlaylistInfo **albums, size_t *album_count);
 
 int track_by_id(const char *id, Track **track);
 
