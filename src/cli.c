@@ -104,7 +104,7 @@ playback(int argc, char **argv) {
                 dbus_client_call_method("org.mpris.MediaPlayer2.Player", "Stop");
                 break;
             case '?':
-                printf("No help page yet\n");
+                printf(HELP_TXT_PLAYBACK);
                 exit(EXIT_SUCCESS);
             default:
                 printf("?? getopt returned character code 0%o ??\n", c);
@@ -160,7 +160,7 @@ track(int argc, char **argv) {
                 free(metadata);
                 break;
             case '?':
-                printf("No help page yet\n");
+                printf(HELP_TXT_TRACK);
                 exit(EXIT_SUCCESS);
             default:
                 printf("?? getopt returned character code 0%o ??\n", c);
@@ -171,6 +171,10 @@ track(int argc, char **argv) {
 
 int
 search_cli(int argc, char **argv) {
+    if (argc<2){
+        printf(HELP_TXT_SEARCH);
+        exit(EXIT_FAILURE);
+    }
     bool t = false, a = false, p = false;
     int c;
 
@@ -200,7 +204,7 @@ search_cli(int argc, char **argv) {
                 p = true;
                 break;
             case '?':
-                printf("No help page yet\n");
+                printf(HELP_TXT_SEARCH);
                 exit(EXIT_SUCCESS);
             default:
                 printf("?? getopt returned character code 0%o ??\n", c);
@@ -228,6 +232,12 @@ search_cli(int argc, char **argv) {
         strcat(query, argv[i]);
         query_size_used = strlen(query) + 1;
         query[query_size_used++ - 1] = ' ';
+    }
+    if (str_is_empty(query)){
+        fprintf(stderr, "Query cannot be empty!\n");
+        printf(HELP_TXT_SEARCH);
+        free(query);
+        exit(EXIT_FAILURE);
     }
     printf("Searching with query: %s\n", query);
 
@@ -363,10 +373,14 @@ search_cli(int argc, char **argv) {
 int
 handle_cli(int argc, char **argv) {
     if (argc < 2) {
-        printf("Incorrect usage\n");
-        return 1;
+        printf(HELP_TXT_GENERAL);
+        exit(EXIT_FAILURE);
     }
     if (!strcmp(argv[1], "daemon")) {
+        if (argc > 2){
+            printf(HELP_TXT_DAEMON);
+            exit(EXIT_FAILURE);
+        }
         return 0;
     } else if (!strcmp(argv[1], "playback") || !strcmp(argv[1], "pb")) {
         return playback(argc - 1, &argv[1]);
@@ -375,10 +389,18 @@ handle_cli(int argc, char **argv) {
     } else if (!strcmp(argv[1], "search") || !strcmp(argv[1], "s")) {
         return search_cli(argc - 1, &argv[1]);
     } else if (!strcmp(argv[1], "quit") || !strcmp(argv[1], "q")) {
+        if (argc > 2) {
+            printf(HELP_TXT_QUIT);
+            return 1;
+        }
         init_dbus_client();
         dbus_client_call_method("org.mpris.MediaPlayer2", "Quit");
         return 1;
     } else if (!strcmp(argv[1], "open") || !strcmp(argv[1], "o")) {
+        if (argc == 2 || (strncasecmp(argv[2], "http", 4) != 0 && strncasecmp(argv[2], "spotify", 7) != 0)) {
+            printf(HELP_TXT_OPEN);
+            return 1;
+        }
         char *uri = calloc(100, sizeof(*uri));
         size_t uri_size = 100;
         size_t uri_size_used = 0;
@@ -400,7 +422,8 @@ handle_cli(int argc, char **argv) {
         dbus_client_open(uri);
         return 1;
     } else {
-        printf("Incorrect usage\n");
+        printf(HELP_TXT_GENERAL);
+        exit(EXIT_FAILURE);
     }
     return 1;
 }

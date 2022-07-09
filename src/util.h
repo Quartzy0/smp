@@ -83,6 +83,8 @@ int compare_last_played_reverse(const void *a, const void *b);
 
 int compare_artist_quantities(const void *a, const void *b);
 
+bool str_is_empty(const char *str);
+
 //https://stackoverflow.com/a/49028514
 void rek_mkdir(const char *path);
 

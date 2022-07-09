@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <ctype.h>
 #include "spotify.h"
 
 Action action_queue[QUEUE_MAX];
@@ -135,6 +136,14 @@ compare_last_played_reverse(const void *a, const void *b) {
 
 int compare_artist_quantities(const void *a, const void *b) {
     return (int) (((struct ArtistQuantity *) b)->appearances - ((struct ArtistQuantity *) a)->appearances);
+}
+
+bool str_is_empty(const char *str){
+    size_t len = strlen(str);
+    for (int i = 0; i < len; ++i) {
+        if (!isspace(str[i]))return false;
+    }
+    return true;
 }
 
 void
