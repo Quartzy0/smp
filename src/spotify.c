@@ -96,7 +96,7 @@ search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **p
     ensure_token();
 
     //playlist,album,track
-    char *type = malloc(21 * sizeof(*type));
+    char type[21];
     char *type_p = type;
     bool prev = false;
     if (tracks) {
@@ -136,7 +136,6 @@ search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **p
 
     char *url = malloc((42 + strlen(type) + strlen(query) + 1) * sizeof(*url));
     snprintf(url, 42 + strlen(type) + strlen(query) + 1, "https://api.spotify.com/v1/search?type=%s&q=%s", type, query);
-    free(type);
 
     redo:;
     struct curl_slist *list = NULL;
@@ -524,6 +523,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
 
 void
 free_tracks(Track *track, size_t count) {
+    if (!track || !count) return;
     for (int i = 0; i < count; ++i) {
         free(track[i].spotify_name);
         track[i].spotify_name = NULL;

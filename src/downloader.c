@@ -176,7 +176,7 @@ search_for_track(char *instance, char **url_out, char *query, char *title, char 
         goto search_regular;
     }
     music_index = find_match(searchResults, title, artist, &music_score);
-    if (music_score < 0.5f)
+    if (music_score < 0.6f)
         goto search_regular;
 
     free(url);

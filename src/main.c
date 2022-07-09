@@ -166,6 +166,16 @@ download_checks(void *arg) {
                 }
                 break;
             }
+            case ACTION_STOP: {
+                pause();
+                stop();
+                free_tracks(tracks, track_count);
+                tracks = NULL;
+                free_tracks(next_tracks, next_track_count);
+                next_tracks = NULL;
+                next_track_count = 0;
+                break;
+            }
             case ACTION_TRACK_OVER:
             case ACTION_POSITION_RELATIVE: {
                 if (started) {

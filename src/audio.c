@@ -160,6 +160,7 @@ int play() {
 }
 
 int pause() {
+    if (!status) return 0;
     PaError error = Pa_StopStream(stream);
     if (error != paNoError) {
         fprintf(stderr, "[audio] Problem stopping stream\n");
@@ -170,6 +171,7 @@ int pause() {
 }
 
 int stop() {
+    if (!started) return 0;
     status = 0;
     started = 0;
 

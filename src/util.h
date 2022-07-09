@@ -21,6 +21,7 @@ typedef enum ActionType {
     ACTION_PLAY,
     ACTION_PAUSE,
     ACTION_PLAYPAUSE,
+    ACTION_STOP,
     ACTION_QUIT,
     ACTION_PLAYLIST,
     ACTION_TRACK,

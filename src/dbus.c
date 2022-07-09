@@ -669,8 +669,7 @@ int check_player_command(DBusMessage *msg) {
         rear.type = ACTION_QUIT;
         sem_post(&state_change_lock);
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Stop")) {
-        running = 0;
-        rear.type = ACTION_QUIT;
+        rear.type = ACTION_STOP;
         sem_post(&state_change_lock);
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Seek")) {
         rear.type = ACTION_SEEK;

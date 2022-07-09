@@ -68,6 +68,12 @@ int dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out);
 
 void free_metadata(Metadata *metadata);
 
+void dbus_client_call_method(const char *iface, const char *method);
+
+void dbus_client_set_property(const char *iface, const char *name, int type, void *value);
+
+int dbus_client_get_property(const char *iface, const char *name, int type, void *value);
+
 void print_properties(FILE *stream, PlayerProperties *properties);
 
 #endif //SMP_DBUS_CLIENT_H

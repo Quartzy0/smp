@@ -71,25 +71,26 @@ urlencode(char *src) {
 
 ActionType
 id_from_url(const char *src, char *out) {
-    char *first = strchr(src, ':');
-    if (!first) return ACTION_NONE;
-    char *second = strchr(first + 1, ':');
-    if (!second) return ACTION_NONE;
-    second++;
-    ActionType type;
-    if (!memcmp(first + 1, "track", 5)) {
-        type = ACTION_TRACK;
-    } else if (!memcmp(first + 1, "album", 5)) {
-        type = ACTION_ALBUM;
-    } else if (!memcmp(first + 1, "playlist", 8)) {
-        type = ACTION_PLAYLIST;
-    } else {
-        type = ACTION_NONE;
+    char s;
+    if (*src == 'h'){ // e.g. https://open.spotify.com/track/4pQRZ0Pt9VPWtqpYsMvomM ...
+        s = '/';
+    }else if (*src == 's'){ // e.g. spotify:track:4pQRZ0Pt9VPWtqpYsMvomM
+        s = ':';
+    }else{
+        return ACTION_NONE;
     }
-    unsigned count = strlen(src) - (second - src);
-    memcpy(out, second, count);
-    out[count] = 0;
-    return type;
+    char *last = strrchr(src, s);
+    memcpy(out, last + 1, SPOTIFY_ID_LEN);
+    out[SPOTIFY_ID_LEN] = 0;
+    switch (*(last - 1)) {
+        case 'k': // tracK
+            return ACTION_TRACK;
+        case 'm': // albuM
+            return ACTION_ALBUM;
+        case 't': // playlisT
+            return ACTION_PLAYLIST;
+    }
+    return ACTION_NONE;
 }
 
 const char find_str[] = "’";

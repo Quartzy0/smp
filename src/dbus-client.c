@@ -43,38 +43,15 @@ init_dbus_client() {
         return 1;
     }
 
-    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
-                                                    "org.freedesktop.DBus.Properties", "Get");
-    char *iface_name = "org.mpris.MediaPlayer2", *property = "Identity";
-    dbus_message_append_args(msg,
-                             DBUS_TYPE_STRING, &iface_name,
-                             DBUS_TYPE_STRING, &property,
-                             DBUS_TYPE_INVALID);
-    dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
-    dbus_message_unref(msg);
-
-    dbus_connection_read_write_dispatch(conn, -1); // Write the message
-    dbus_connection_read_write_dispatch(conn, -1); // Then wait for reply
-    DBusMessage *reply = dbus_connection_pop_message(conn);
-
-    if (!reply) {
-        fprintf(stderr, "[dbus-client] No message was received\n");
-        return 1;
-    }
-
+    dbus_connection_read_write_dispatch(conn, 0); // Idk why, but this has to be here
+                                                                                 // Probably some dbus protocol stuff
     char *identity = NULL;
+    dbus_client_get_property("org.mpris.MediaPlayer2", "Identity", DBUS_TYPE_STRING, &identity);
 
-    DBusMessageIter iter, val;
-    dbus_message_iter_init(reply, &iter);
-    dbus_message_iter_recurse(&iter, &val);
-    dbus_message_iter_get_basic(&val, &identity);
-
-    if (strcmp(identity, "smp")) {
+    if (strcmp(identity, "smp")!=0) {
         printf("[dbus-client] Warning: Received identity of different media player (expected: smp got: %s). Some features might be broken\n",
                identity);
     }
-    dbus_message_unref(reply);
     return 0;
 }
 
@@ -553,5 +530,5 @@ print_properties(FILE *stream, PlayerProperties *properties) {
     fprintf(stream, "Player info:\n");
     fprintf(stream, "\tLooping: %s\n", loop_status);
     fprintf(stream, "\tShuffle: %s\n", properties->shuffle ? "true" : "false");
-    fprintf(stream, "\tVolume: %lf\n", properties->volume);
+    fprintf(stream, "\tVolume: %lf%%\n", 100.0 * properties->volume);
 }
