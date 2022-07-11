@@ -39,7 +39,7 @@ init_dbus_client() {
             return 1;
         }
         fprintf(stderr,
-                "[dbus-client] The smp daemon is not running or could not be reached. Make sure there is an instance of this program running with the -d option\n");
+                "[dbus-client] The smp daemon is not running or could not be reached. Make sure there is an instance of this program running with the daemon subcommand\n");
         return 1;
     }
 

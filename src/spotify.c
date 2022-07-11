@@ -491,7 +491,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
     size_t i = 0;
     cJSON_ArrayForEach(element, tracks_array) {
         cJSON *track = cJSON_GetObjectItem(element, "track");
-        if (cJSON_IsNull(track)) {
+        if (cJSON_IsNull(track) || cJSON_IsTrue(cJSON_GetObjectItem(track, "is_local"))) {
             continue;
         }
         memcpy((*tracksOut)[i].spotify_id, cJSON_GetObjectItem(track, "id")->valuestring, 23);

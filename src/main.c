@@ -186,8 +186,8 @@ download_checks(void *arg) {
                     //Do nothing
                 } else if (shuffle) {
                     size_t newI;
-                    while ((newI = (size_t) (((float) track_count) *
-                                             (((float) rand()) / ((float) RAND_MAX)))) != track_index &&
+                    while ((newI = (size_t) ((float) track_count *
+                                             ((float) rand() / (float) RAND_MAX))) == track_index &&
                            track_count > 1) {}
                     track_index = newI;
                 } else {
@@ -278,7 +278,6 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    player_section:
     if (load_config()) {
         return EXIT_FAILURE;
     }

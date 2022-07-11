@@ -11,18 +11,19 @@
 #include "util.h"
 #include "spotify.h"
 
-int
+void
 playback(int argc, char **argv) {
     if (argc == 1) {
-        init_dbus_client();
+        if(init_dbus_client())
+            return;
         PlayerProperties s;
         s.playback_status = 100;
         if (get_player_properties(&s)) {
             fprintf(stderr, "[dbus-client] Error while getting player status\n");
-            return 0;
+            return;
         }
         print_properties(stdout, &s);
-        return 1;
+        return;
     }
     int c;
 
@@ -49,27 +50,28 @@ playback(int argc, char **argv) {
 
         switch (c) {
             case 't':
-                init_dbus_client();
-                dbus_client_pause_play();
+                if(!init_dbus_client())
+                    dbus_client_pause_play();
                 break;
             case 'p':
-                init_dbus_client();
-                dbus_client_play();
+                if(!init_dbus_client())
+                    dbus_client_play();
                 break;
             case 'P':
-                init_dbus_client();
-                dbus_client_pause();
+                if(!init_dbus_client())
+                    dbus_client_pause();
                 break;
             case 'n':
-                init_dbus_client();
-                dbus_client_next();
+                if(!init_dbus_client())
+                    dbus_client_next();
                 break;
             case 'b':
-                init_dbus_client();
-                dbus_client_previous();
+                if(!init_dbus_client())
+                    dbus_client_previous();
                 break;
             case 'v':
-                init_dbus_client();
+                if(init_dbus_client())
+                    break;
                 if (optarg) {
                     char *end = NULL;
                     double d = strtod(optarg, &end);
@@ -78,13 +80,15 @@ playback(int argc, char **argv) {
                 printf("%lf\n", dbus_client_get_volume());
                 break;
             case 's':
-                init_dbus_client();
+                if(init_dbus_client())
+                    break;
                 bool shuffle_mode = dbus_client_get_shuffle_mode();
                 dbus_client_set_shuffle_mode(!shuffle_mode);
-                printf("%s", shuffle_mode ? "false" : "true");
+                printf("Shuffle: %s\n", shuffle_mode ? "off" : "on");
                 break;
             case 'l':
-                init_dbus_client();
+                if(init_dbus_client())
+                    break;
                 LoopMode loop_mode = dbus_client_get_loop_mode();
                 loop_mode = (loop_mode + 1) % LOOP_MODE_LAST;
                 dbus_client_set_loop_mode(loop_mode);
@@ -100,7 +104,8 @@ playback(int argc, char **argv) {
                 printf("%s\n", loop_mode_string);
                 break;
             case 'S':
-                init_dbus_client();
+                if(init_dbus_client())
+                    break;
                 dbus_client_call_method("org.mpris.MediaPlayer2.Player", "Stop");
                 break;
             case '?':
@@ -110,21 +115,21 @@ playback(int argc, char **argv) {
                 printf("?? getopt returned character code 0%o ??\n", c);
         }
     }
-    return 1;
 }
 
-int
+void
 track(int argc, char **argv) {
     if (argc == 1) {
-        init_dbus_client();
+        if(init_dbus_client())
+            return;
         PlayerProperties s;
         s.playback_status = 100;
         if (get_player_properties(&s)) {
             fprintf(stderr, "[dbus-client] Error while getting player status\n");
-            return 0;
+            return;
         }
         print_properties(stdout, &s);
-        return 1;
+        return;
     }
     int c;
 
@@ -143,7 +148,8 @@ track(int argc, char **argv) {
 
         switch (c) {
             case 'l':
-                init_dbus_client();
+                if(init_dbus_client())
+                    return;
                 char **tracks = NULL;
                 int count = 0;
                 dbus_client_tracklist_get_tracks(&tracks, &count);
@@ -166,10 +172,9 @@ track(int argc, char **argv) {
                 printf("?? getopt returned character code 0%o ??\n", c);
         }
     }
-    return 1;
 }
 
-int
+void
 search_cli(int argc, char **argv) {
     if (argc<2){
         printf(HELP_TXT_SEARCH);
@@ -305,9 +310,10 @@ search_cli(int argc, char **argv) {
             }
             char *end = NULL;
             size_t index = strtol(line, &end, 10);
-            init_dbus_client();
-            dbus_client_open(tracks[index - 1].spotify_uri);
             free(line);
+            if(init_dbus_client())
+                return;
+            dbus_client_open(tracks[index - 1].spotify_uri);
             break;
         }
         case 'A':
@@ -323,16 +329,17 @@ search_cli(int argc, char **argv) {
             }
             char *end = NULL;
             size_t index = strtol(line, &end, 10);
-            init_dbus_client();
+            free(line);
+            if (init_dbus_client())
+                return;
             char uri[37] = "spotify:album:";
             memcpy(&uri[14], albums[index - 1].spotify_id, SPOTIFY_ID_LEN_NULL);
             dbus_client_open(uri);
-            free(line);
             break;
         }
         case 'P':
         case 'p': {
-            printf("Choose playlist (1 - %zu)\n> ", album_count);
+            printf("Choose playlist (1 - %zu)\n> ", playlist_count);
 
             char *line = NULL;
             size_t len = 0;
@@ -343,11 +350,12 @@ search_cli(int argc, char **argv) {
             }
             char *end = NULL;
             size_t index = strtol(line, &end, 10);
-            init_dbus_client();
+            free(line);
+            if (init_dbus_client())
+                return;
             char uri[40] = "spotify:playlist:";
             memcpy(&uri[17], playlists[index - 1].spotify_id, SPOTIFY_ID_LEN_NULL);
             dbus_client_open(uri);
-            free(line);
             break;
         }
         default:
@@ -367,7 +375,6 @@ search_cli(int argc, char **argv) {
         free_playlist(&playlists[i]);
     }
     free(playlists);
-    return 1;
 }
 
 int
@@ -376,26 +383,25 @@ handle_cli(int argc, char **argv) {
         printf(HELP_TXT_GENERAL);
         exit(EXIT_FAILURE);
     }
-    if (!strcmp(argv[1], "daemon")) {
+    if (!strcmp(argv[1], "daemon") || !strcmp(argv[1], "d")) {
         if (argc > 2){
             printf(HELP_TXT_DAEMON);
             exit(EXIT_FAILURE);
         }
         return 0;
     } else if (!strcmp(argv[1], "playback") || !strcmp(argv[1], "pb")) {
-        return playback(argc - 1, &argv[1]);
+        playback(argc - 1, &argv[1]);
     } else if (!strcmp(argv[1], "track") || !strcmp(argv[1], "t")) {
-        return track(argc - 1, &argv[1]);
+        track(argc - 1, &argv[1]);
     } else if (!strcmp(argv[1], "search") || !strcmp(argv[1], "s")) {
-        return search_cli(argc - 1, &argv[1]);
+        search_cli(argc - 1, &argv[1]);
     } else if (!strcmp(argv[1], "quit") || !strcmp(argv[1], "q")) {
         if (argc > 2) {
             printf(HELP_TXT_QUIT);
             return 1;
         }
-        init_dbus_client();
-        dbus_client_call_method("org.mpris.MediaPlayer2", "Quit");
-        return 1;
+        if(!init_dbus_client())
+            dbus_client_call_method("org.mpris.MediaPlayer2", "Quit");
     } else if (!strcmp(argv[1], "open") || !strcmp(argv[1], "o")) {
         if (argc == 2 || (strncasecmp(argv[2], "http", 4) != 0 && strncasecmp(argv[2], "spotify", 7) != 0)) {
             printf(HELP_TXT_OPEN);
@@ -418,9 +424,8 @@ handle_cli(int argc, char **argv) {
             uri_size_used = strlen(uri) + 1;
             uri[uri_size_used++ - 1] = ' ';
         }
-        init_dbus_client();
-        dbus_client_open(uri);
-        return 1;
+        if(!init_dbus_client())
+            dbus_client_open(uri);
     } else {
         printf(HELP_TXT_GENERAL);
         exit(EXIT_FAILURE);
