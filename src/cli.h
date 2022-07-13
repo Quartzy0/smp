@@ -107,7 +107,7 @@
                             "\t-p, --page\n"\
                             "\t\tControl what page should be show on the playlist list. Does nothing by itself.\n\n"
 
-#define PLAYLISTS_PER_PAGE 3
+#define PLAYLISTS_PER_PAGE 10
 
 int handle_cli(int argc, char **argv);
 
