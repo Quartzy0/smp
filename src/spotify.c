@@ -475,6 +475,7 @@ get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut) {
         }
         fprintf(stderr, "[spotify] Error occurred when trying to get playlist info: %s\n", error);
         cJSON_Delete(root);
+        free(file);
         return 1;
     }
 
@@ -833,6 +834,7 @@ get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *countOut) {
 
         read_playlist_info_from_file(name, &((*playlistInfo)[i++]));
     }
+    free(name);
     if (errno) {
         fprintf(stderr, "[spotify] Error while counting playlists in directory '%s': %s\n", playlist_save_path,
                 strerror(errno));

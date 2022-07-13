@@ -12,7 +12,7 @@
 #include "util.h"
 #include "spotify.h"
 
-bool running = false;
+dbus_bool_t running = false;
 
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
@@ -128,6 +128,9 @@ void get_playlist_dbus(DBusMessageIter *iter, PlaylistInfo *info) {
         dbus_message_iter_append_basic(&props, DBUS_TYPE_OBJECT_PATH, &obj_path);
         dbus_message_iter_append_basic(&props, DBUS_TYPE_STRING, &info->name);
         dbus_message_iter_append_basic(&props, DBUS_TYPE_STRING, &info->image_url);
+        dbus_message_iter_close_container(iter, &props);
+        free(obj_path);
+        return;
     } else {
         const char *obj_path = "/";
         const char *name = "";
@@ -143,7 +146,7 @@ void get_playlist_maybe(DBusMessageIter *iter) {
     DBusMessageIter bools;
     dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &bools);
 
-    bool value = started * cplaylist.not_empty;
+    dbus_bool_t value = started * cplaylist.not_empty;
     dbus_message_iter_append_basic(&bools, DBUS_TYPE_BOOLEAN, &value);
 
     get_playlist_dbus(&bools, (PlaylistInfo *) (value * (uint64_t) &cplaylist) /* No branching ;) */);
@@ -158,19 +161,19 @@ void get_mediaplayer(DBusMessage *msg, char *property) {
     dbus_message_iter_init_append(reply, &reply_args);
     if (!strcmp(property, "CanQuit")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "Fullscreen")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = false;
+        dbus_bool_t value = false;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanSetFullscreen")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = false;
+        dbus_bool_t value = false;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanRaise")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = false;
+        dbus_bool_t value = false;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "Identity")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "s", &var);
@@ -182,7 +185,7 @@ void get_mediaplayer(DBusMessage *msg, char *property) {
         dbus_message_iter_append_fixed_array(&var, DBUS_TYPE_STRING, value, 1);
     } else if (!strcmp(property, "HasTrackList")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_fixed_array(&var, DBUS_TYPE_BOOLEAN, &value, 1);
     }
     dbus_message_iter_close_container(&reply_args, &var);
@@ -205,27 +208,27 @@ void get_mediaplayer_player(DBusMessage *msg, char *property) {
     dbus_message_iter_init_append(reply, &reply_args);
     if (!strcmp(property, "CanGoNext")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanGoPrevious")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanPlay")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanPause")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanControl")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "CanSeek")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = true;
+        dbus_bool_t value = true;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "PlaybackStatus")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "s", &var);
@@ -263,7 +266,8 @@ void get_mediaplayer_player(DBusMessage *msg, char *property) {
         dbus_message_iter_append_basic(&var, DBUS_TYPE_STRING, &value);
     } else if (!strcmp(property, "Shuffle")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &shuffle);
+        dbus_bool_t s = (dbus_bool_t) shuffle;
+        dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &s);
     } else if (!strcmp(property, "Volume")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "d", &var);
         dbus_message_iter_append_basic(&var, DBUS_TYPE_DOUBLE, &volume);
@@ -358,7 +362,7 @@ void get_mediaplayer_tracklist(DBusMessage *msg, char *property) {
 
     if (!strcmp(property, "CanEditTracks")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &var);
-        bool value = false;
+        dbus_bool_t value = false;
         dbus_message_iter_append_basic(&var, DBUS_TYPE_BOOLEAN, &value);
     } else if (!strcmp(property, "Tracks")) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "ao", &var);
@@ -476,7 +480,8 @@ void getall_mediaplayer_player(DBusMessage *msg) {
             add_dict_entry(&dict, "LoopStatus", "None", DBUS_TYPE_STRING);
             break;
     }
-    add_dict_entry(&dict, "Shuffle", (void *) shuffle, DBUS_TYPE_BOOLEAN);
+    dbus_bool_t s = (dbus_bool_t) shuffle;
+    add_dict_entry(&dict, "Shuffle", (void *) s, DBUS_TYPE_BOOLEAN);
     add_dict_entry_p(&dict, "Volume", &volume, DBUS_TYPE_DOUBLE);
 
     //Metadata
@@ -717,7 +722,7 @@ int check_playlist_command(DBusMessage *msg) {
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "GetPlaylists")) {
         uint32_t index, max_count;
         char *order;
-        bool reverse_order;
+        dbus_bool_t reverse_order;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_UINT32, &index, DBUS_TYPE_UINT32, &max_count, DBUS_TYPE_STRING,
                                    &order, DBUS_TYPE_BOOLEAN, &reverse_order, DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
@@ -739,15 +744,15 @@ int check_playlist_command(DBusMessage *msg) {
         }
         qsort(playlists, count, sizeof(*playlists), compar);
 
-        count = count > max_count ? max_count : count;
+        uint32_t count_clipped = count - index > max_count ? max_count : count - index;
 
         dbus_uint32_t serial = 0;
         DBusMessage *ret = dbus_message_new_method_return(msg);
         DBusMessageIter reply, arr;
         dbus_message_iter_init_append(ret, &reply);
         dbus_message_iter_open_container(&reply, DBUS_TYPE_ARRAY, "(oss)", &arr);
-        for (uint32_t i = index; i < count; ++i) {
-            get_playlist_dbus(&arr, &playlists[i]);
+        for (uint32_t i = 0; i < count_clipped; ++i) {
+            get_playlist_dbus(&arr, &playlists[i + index]);
         }
         dbus_message_iter_close_container(&reply, &arr);
 
@@ -759,6 +764,10 @@ int check_playlist_command(DBusMessage *msg) {
 
         // free the reply
         dbus_message_unref(ret);
+        for (int i = 0; i < count; ++i) {
+            free_playlist(&playlists[i]);
+        }
+        free(playlists);
         return 2;
     } else {
         return 0;

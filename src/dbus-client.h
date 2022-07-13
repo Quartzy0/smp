@@ -16,6 +16,21 @@ typedef enum PlaybackStatus{
     PBS_STOPPED
 } PlaybackStatus;
 
+typedef enum PlaylistOrder{
+    ORDER_ALPHABETICAL=0,
+    ORDER_CREATED,
+    ORDER_MODIFIED,
+    ORDER_PLAYED,
+    ORDER_USER
+} PlaylistOrder;
+
+typedef struct DBusPlaylistInfo{
+    bool valid;
+    char *id; //DBus object path, not spotify id
+    char *name;
+    char *icon;
+} DBusPlaylistInfo;
+
 typedef struct Metadata{
     char *track_id;
     int64_t length;
@@ -68,6 +83,14 @@ int dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out);
 
 void free_metadata(Metadata *metadata);
 
+int dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out, int *count_out);
+
+int dbus_client_get_playlist_count(uint32_t *count);
+
+int dbus_client_get_active_playlist(DBusPlaylistInfo *out);
+
+int dbus_client_activate_playlist(const char *id /* DBus object path */);
+
 void dbus_client_call_method(const char *iface, const char *method);
 
 void dbus_client_set_property(const char *iface, const char *name, int type, void *value);
@@ -75,5 +98,7 @@ void dbus_client_set_property(const char *iface, const char *name, int type, voi
 int dbus_client_get_property(const char *iface, const char *name, int type, void *value);
 
 void print_properties(FILE *stream, PlayerProperties *properties);
+
+void free_dbus_playlist(DBusPlaylistInfo *in);
 
 #endif //SMP_DBUS_CLIENT_H

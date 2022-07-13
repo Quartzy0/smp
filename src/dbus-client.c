@@ -110,12 +110,8 @@ get_player_properties(PlayerProperties *properties) {
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
     dbus_message_unref(msg);
 
@@ -145,7 +141,7 @@ get_player_properties(PlayerProperties *properties) {
             } else {
                 properties->playback_status = PBS_STOPPED;
             }
-        } else if (!strcmp(name, "LoopMode")) {
+        } else if (!strcmp(name, "LoopStatus")) {
             char *l_status = NULL;
             dbus_message_iter_get_basic(&val, &l_status);
             if (!strcmp(l_status, "None")) {
@@ -183,12 +179,8 @@ dbus_client_call_method(const char *iface, const char *method) {
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
     dbus_message_unref(msg);
 }
@@ -232,12 +224,8 @@ dbus_client_open(const char *uri) {
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
     dbus_message_unref(msg);
 }
@@ -265,12 +253,8 @@ dbus_client_set_property(const char *iface, const char *name, int type, void *va
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
     dbus_message_unref(msg);
 }
@@ -291,12 +275,8 @@ dbus_client_get_property_reply(const char *iface, const char *name, DBusMessage 
         dbus_connection_read_write(conn, 0);
         *reply = dbus_connection_pop_message(conn);
 
-        if (NULL == *reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (*reply) break;
+        usleep(10000);
     }
 
     if (!*reply) {
@@ -323,12 +303,8 @@ dbus_client_get_property(const char *iface, const char *name, int type, void *va
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
 
     if (!reply) {
@@ -397,14 +373,14 @@ dbus_client_set_loop_mode(LoopMode mode) {
 
 bool
 dbus_client_get_shuffle_mode() {
-    uint32_t s = 0;
+    dbus_bool_t s = 0;
     dbus_client_get_property("org.mpris.MediaPlayer2.Player", "Shuffle", DBUS_TYPE_BOOLEAN, &s);
     return (bool) s;
 }
 
 void
 dbus_client_set_shuffle_mode(bool mode) {
-    uint32_t s = mode;
+    dbus_bool_t s = (dbus_bool_t) mode;
     dbus_client_set_property("org.mpris.MediaPlayer2.Player", "Shuffle", DBUS_TYPE_BOOLEAN, (void *) &s);
 }
 
@@ -453,12 +429,8 @@ dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out) {
         dbus_connection_read_write(conn, 0);
         reply = dbus_connection_pop_message(conn);
 
-        if (NULL == reply) {
-            usleep(10000);
-            continue;
-        } else {
-            break;
-        }
+        if (reply) break;
+        usleep(10000);
     }
 
     if (!reply) {
@@ -485,6 +457,149 @@ free_metadata(Metadata *metadata) {
     free(metadata->artist);
     free(metadata->title);
     free(metadata->url);
+}
+
+int
+dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out, int *count_out){
+    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
+                                                    "org.mpris.MediaPlayer2.Playlists", "GetPlaylists");
+    char *order_str;
+    switch (order) {
+        case ORDER_ALPHABETICAL:
+            order_str = "Alphabetical";
+            break;
+        case ORDER_CREATED:
+            order_str = "Created";
+            break;
+        case ORDER_MODIFIED:
+            order_str = "Modified";
+            break;
+        case ORDER_PLAYED:
+            order_str = "Played";
+            break;
+        case ORDER_USER:
+            order_str = "User";
+            break;
+        default:
+            order_str = "User";
+            break;
+    }
+    uint32_t v = (uint32_t) reverse;
+
+    dbus_message_append_args(msg,
+                             DBUS_TYPE_UINT32, &index,
+                             DBUS_TYPE_UINT32, &max_count,
+                             DBUS_TYPE_STRING, &order_str,
+                             DBUS_TYPE_BOOLEAN, &v,
+                             DBUS_TYPE_INVALID);
+
+    dbus_uint32_t serial = 0;
+    dbus_connection_send(conn, msg, &serial);
+
+    DBusMessage *reply;
+    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+        dbus_connection_read_write(conn, 0);
+        reply = dbus_connection_pop_message(conn);
+
+        if (reply) break;
+        usleep(10000);
+    }
+    dbus_message_unref(msg);
+    if (!reply){
+        fprintf(stderr, "[dbus-client] Didn't get reply when trying to get playlists\n");
+        return 1;
+    }
+
+    DBusMessageIter iter, arr, stru;
+    dbus_message_iter_init(reply, &iter);
+    if (dbus_message_iter_get_arg_type(&iter)==DBUS_TYPE_STRING){
+        char *s = NULL;
+        dbus_message_iter_get_basic(&iter, &s);
+        fprintf(stderr, "Got error: %s\n", s);
+        return 1;
+    }
+    *count_out = dbus_message_iter_get_element_count(&iter);
+    dbus_message_iter_recurse(&iter, &arr);
+    for (int i = 0; i < *count_out; ++i) {
+        dbus_message_iter_recurse(&arr, &stru);
+        char *val = NULL;
+        dbus_message_iter_get_basic(&stru, &val);
+        out[i].id = strdup(val);
+        dbus_message_iter_next(&stru);
+        dbus_message_iter_get_basic(&stru, &val);
+        out[i].name = strdup(val);
+        dbus_message_iter_next(&stru);
+        dbus_message_iter_get_basic(&stru, &val);
+        out[i].icon = strdup(val);
+        out[i].valid = true;
+        dbus_message_iter_next(&arr);
+    }
+    dbus_message_unref(reply);
+    return 0;
+}
+
+int
+dbus_client_get_playlist_count(uint32_t *count){
+    return dbus_client_get_property("org.mpris.MediaPlayer2.Playlists", "PlaylistCount", DBUS_TYPE_UINT32, count);
+}
+
+int
+dbus_client_get_active_playlist(DBusPlaylistInfo *out){
+    DBusMessage *reply;
+    if(dbus_client_get_property_reply("org.mpris.MediaPlayer2.Playlists", "ActivePlaylist", &reply)){
+        return 1;
+    }
+
+    DBusMessageIter iter, val, stru1, stru2;
+    dbus_message_iter_init(reply, &iter);
+    dbus_message_iter_recurse(&iter, &val);
+    dbus_message_iter_recurse(&val, &stru1);
+    dbus_bool_t playlist = 0;
+    dbus_message_iter_get_basic(&stru1, &playlist);
+    if (!playlist) {
+        out->valid = false;
+        return 0;
+    }
+    dbus_message_iter_next(&stru1);
+    dbus_message_iter_recurse(&stru1, &stru2);
+    dbus_message_iter_get_basic(&stru2, &out->id);
+    dbus_message_iter_next(&stru2);
+    dbus_message_iter_get_basic(&stru2, &out->name);
+    dbus_message_iter_next(&stru2);
+    dbus_message_iter_get_basic(&stru2, &out->icon);
+    dbus_message_unref(reply);
+    out->valid = true;
+    return 0;
+}
+
+int
+dbus_client_activate_playlist(const char *id /* DBus object path */){
+    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
+                                                    "org.mpris.MediaPlayer2.Playlists", "ActivatePlaylist");
+    dbus_message_append_args(msg, DBUS_TYPE_OBJECT_PATH, &id, DBUS_TYPE_INVALID);
+
+    dbus_uint32_t serial = 0;
+    dbus_connection_send(conn, msg, &serial);
+
+    DBusMessage *reply;
+    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+        dbus_connection_read_write(conn, 0);
+        reply = dbus_connection_pop_message(conn);
+
+        if (reply) break;
+        usleep(10000);
+    }
+    dbus_message_unref(msg);
+    return !!reply;
+}
+
+void
+free_dbus_playlist(DBusPlaylistInfo *in){
+    if (!in || !in->valid) return;
+    free(in->name);
+    free(in->icon);
+    free(in->id);
+    memset(in, 0, sizeof(*in));
 }
 
 void

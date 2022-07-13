@@ -178,10 +178,9 @@ download_checks(void *arg) {
             }
             case ACTION_TRACK_OVER:
             case ACTION_POSITION_RELATIVE: {
-                if (started) {
-                    pause();
-                    stop();
-                }
+                if (!started) break;
+                pause();
+                stop();
                 if (a.type == ACTION_TRACK_OVER && loop_mode == LOOP_MODE_TRACK) {
                     //Do nothing
                 } else if (shuffle) {
@@ -229,10 +228,9 @@ download_checks(void *arg) {
                 break;
             }
             case ACTION_POSITION_ABSOLUTE: {
-                if (started) {
-                    pause();
-                    stop();
-                }
+                if (!started) break;
+                pause();
+                stop();
                 if (a.position >= track_count || a.position < 0) break;
                 track_index = a.position;
                 redo_audio();
