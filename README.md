@@ -120,34 +120,36 @@ smp quit
 This command will cause the daemon to stop.
 
 ### Configuration file
-The configuration file should be located at `XDG_CONFIG_HOME/smp/smp.conf`. If the
+The configuration file should be located at `XDG_CONFIG_HOME/smp/smp.json`. If the
 `XDG_CONFIG_HOME` environment variable is not set, smp will look for the configuration
-file at `$HOME/.config/smp/smp.conf`
+file at `$HOME/.config/smp/smp.json`
 #### Contents
-```
-#Number of tracks to download ahead of the current track
-#This option is useful since each track has to be downloaded,
-#which would result in long wait times between tracks
-#preload_amount = 3
-
-#The volume the player should start with. Even if this option
-#is set, the volume can still be changed using the CLI
-#initial_volume = 1.0
-
-#The location where the downloaded tracks should be stored.
-#Defaults to $XDG_CACHE_HOME/smp/tracks or $HOME/.cache/smp/tracks
-#track_save_path = $XDG_CACHE_HOME/smp/tracks
-
-#The location where the saved playlists should be stored.
-#Defaults to $XDG_DATA_HOME/smp/playlists or $HOME/.local/share/smp/playlists
-#playlist_save_path = $XDG_DATA_HOME/smp/playlists
-
-#A string array of piped instances to use. These are used to search
-#for tracks on YouTube and YouTube Music but not to download the tracks.
-#By default it is populated by piped instances from https://piped-instances.kavin.rocks/
-#piped_api_instances = {}
-
-#A string array of invidious/piped instances to use for downloading tracks.
-#By default it is populated by invidious instances from https://api.invidious.io/instances.json
-#download_instances = {}
+```json5
+{
+    //Number of tracks to download ahead of the current track
+    //This option is useful since each track has to be downloaded,
+    //which would result in long wait times between tracks
+    "preload_amount": 3,
+    
+    //The volume the player should start with. Even if this option
+    //is set, the volume can still be changed using the CLI
+    "initial_volume": 1.0,
+    
+    //The location where the downloaded tracks should be stored.
+    //Defaults to $XDG_CACHE_HOME/smp/tracks or $HOME/.cache/smp/tracks
+    "track_save_path": "/home/user/.cache/smp/tracks",
+    
+    //The location where the saved playlists should be stored.
+    //Defaults to $XDG_DATA_HOME/smp/playlists or $HOME/.local/share/smp/playlists
+    "playlist_save_path": "/home/user/.local/share/smp/playlists",
+    
+    //A string array of piped instances to use. These are used to search
+    //for tracks on YouTube and YouTube Music but not to download the tracks.
+    //By default it is populated by piped instances from https://piped-instances.kavin.rocks/
+    "piped_api_instances": [],
+    
+    //A string array of invidious/piped instances to use for downloading tracks.
+    //By default it is populated by invidious instances from https://api.invidious.io/instances.json
+    "download_instances": []
+}
 ```

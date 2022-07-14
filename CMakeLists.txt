@@ -12,12 +12,14 @@ include_directories(include)
 
 add_executable(smp src/main.c src/spotify.c src/util.c src/spotify.h src/util.h src/audio.c src/audio.h src/dbus.c src/dbus.h src/config.c src/config.h src/downloader.c src/downloader.h src/dbus-client.c src/dbus-client.h src/cli.c src/cli.h)
 
+set(CJSON_OVERRIDE_BUILD_SHARED_LIBS false)
+set(CJSON_BUILD_SHARED_LIBS false)
+set(BUILD_SHARED_LIBS false)
 add_subdirectory(lib/cjson EXCLUDE_FROM_ALL)
 
 target_link_libraries(smp cjson)
 target_link_libraries(smp portaudio)
-target_link_libraries(smp sndfile)
 target_link_libraries(smp CURL::libcurl)
 target_link_libraries(smp dbus-1)
 target_link_libraries(smp pthread)
-target_link_libraries(smp confuse)
+target_link_libraries(smp m)
