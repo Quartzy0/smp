@@ -91,7 +91,7 @@ ensure_token() {
 }
 
 int
-search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
+search(const char *query_in, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
        PlaylistInfo **albums, size_t *album_count) {
     ensure_token();
 
@@ -134,6 +134,7 @@ search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **p
     }
     *type_p = 0;
 
+    char *query = urlencode(query_in);
     char *url = malloc((42 + strlen(type) + strlen(query) + 1) * sizeof(*url));
     snprintf(url, 42 + strlen(type) + strlen(query) + 1, "https://api.spotify.com/v1/search?type=%s&q=%s", type, query);
 
@@ -145,6 +146,7 @@ search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **p
     Response response;
     int status = read_url(url, &response, list);
     curl_slist_free_all(list);
+    curl_free(query);
     if (!status) {
         fprintf(stderr, "[spotify] Error when performing request to url %s\n", url);
         free(url);
