@@ -47,6 +47,8 @@ read_url(const char *url, Response *response, struct curl_slist *headers) {
 
         /* we pass our 'chunk' struct to the callback function */
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &response);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1l); // Follow one redirect (fixes some piped instances)
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 1);
         /* some servers do not like requests that are made without a user-agent
             field, so we provide one */
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -66,7 +68,7 @@ read_url(const char *url, Response *response, struct curl_slist *headers) {
 
 //https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
 char *
-urlencode(char *src) {
+urlencode(const char *src) {
     return curl_easy_escape(NULL, src, (int) strlen(src));
 }
 

@@ -90,16 +90,19 @@ playback(int argc, char **argv) {
             case 'l':
                 if (init_dbus_client())
                     break;
-                LoopMode loop_mode = dbus_client_get_loop_mode();
-                loop_mode = (loop_mode + 1) % LOOP_MODE_LAST;
-                dbus_client_set_loop_mode(loop_mode);
-                char *loop_mode_string = "None";
-                switch (loop_mode) {
+                LoopMode loop_mode1 = dbus_client_get_loop_mode();
+                loop_mode1 = (loop_mode + 1) % LOOP_MODE_LAST;
+                dbus_client_set_loop_mode(loop_mode1);
+                char *loop_mode_string;
+                switch (loop_mode1) {
                     case LOOP_MODE_TRACK:
                         loop_mode_string = "Track";
                         break;
                     case LOOP_MODE_PLAYLIST:
                         loop_mode_string = "Playlist";
+                        break;
+                    default:
+                        loop_mode_string = "None";
                         break;
                 }
                 printf("%s\n", loop_mode_string);

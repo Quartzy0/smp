@@ -11,8 +11,8 @@
 
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
-DBusConnection *conn;
-DBusError err;
+DBusConnection *client_conn;
+DBusError client_err;
 
 bool inited = false;
 
@@ -20,22 +20,22 @@ int
 init_dbus_client() {
     if (inited)return 0;
     inited = true;
-    dbus_error_init(&err);
-    conn = dbus_bus_get(DBUS_BUS_SESSION, &err);
+    dbus_error_init(&client_err);
+    client_conn = dbus_bus_get(DBUS_BUS_SESSION, &client_err);
 
-    if (dbus_error_is_set(&err)) {
-        fprintf(stderr, "[dbus] Connection Error (%s)\n", err.message);
-        dbus_error_free(&err);
+    if (dbus_error_is_set(&client_err)) {
+        fprintf(stderr, "[dbus] Connection Error (%s)\n", client_err.message);
+        dbus_error_free(&client_err);
         return 1;
     }
-    if (NULL == conn) {
+    if (NULL == client_conn) {
         fprintf(stderr, "[dbus] Connection Null\n");
         return 1;
     }
 
-    if (!dbus_bus_name_has_owner(conn, mpris_name, &err)) {
-        if (dbus_error_is_set(&err)) {
-            fprintf(stderr, "[dbus-client] Error when checking for name %s: %s\n", mpris_name, err.message);
+    if (!dbus_bus_name_has_owner(client_conn, mpris_name, &client_err)) {
+        if (dbus_error_is_set(&client_err)) {
+            fprintf(stderr, "[dbus-client] Error when checking for name %s: %s\n", mpris_name, client_err.message);
             return 1;
         }
         fprintf(stderr,
@@ -43,7 +43,7 @@ init_dbus_client() {
         return 1;
     }
 
-    dbus_connection_read_write_dispatch(conn, 0); // Idk why, but this has to be here
+    dbus_connection_read_write_dispatch(client_conn, 0); // Idk why, but this has to be here
                                                                                  // Probably some dbus protocol stuff
     char *identity = NULL;
     dbus_client_get_property("org.mpris.MediaPlayer2", "Identity", DBUS_TYPE_STRING, &identity);
@@ -103,12 +103,12 @@ get_player_properties(PlayerProperties *properties) {
                              DBUS_TYPE_STRING, &iface_name,
                              DBUS_TYPE_INVALID);
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) {
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -172,12 +172,12 @@ dbus_client_call_method(const char *iface, const char *method) {
     DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
                                                     iface, method);
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -217,12 +217,12 @@ dbus_client_open(const char *uri) {
     dbus_message_append_args(msg, DBUS_TYPE_STRING, &uri, DBUS_TYPE_INVALID);
 
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -236,7 +236,7 @@ dbus_client_set_property(const char *iface, const char *name, int type, void *va
                                                     "org.freedesktop.DBus.Properties", "Set");
     DBusMessageIter iter, val;
     dbus_message_iter_init_append(msg, &iter);
-    char type_str[] = {type, '\0'};
+    char type_str[] = {(char) type, '\0'};
 
     dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &iface);
     dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &name);
@@ -246,12 +246,12 @@ dbus_client_set_property(const char *iface, const char *name, int type, void *va
     dbus_message_iter_close_container(&iter, &val);
 
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -268,12 +268,12 @@ dbus_client_get_property_reply(const char *iface, const char *name, DBusMessage 
                              DBUS_TYPE_STRING, &name,
                              DBUS_TYPE_INVALID);
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
     dbus_message_unref(msg);
 
     for (int j = 0; j < 5; ++j) { /* Get reply */
-        dbus_connection_read_write(conn, 0);
-        *reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        *reply = dbus_connection_pop_message(client_conn);
 
         if (*reply) break;
         usleep(10000);
@@ -295,13 +295,13 @@ dbus_client_get_property(const char *iface, const char *name, int type, void *va
                              DBUS_TYPE_STRING, &name,
                              DBUS_TYPE_INVALID);
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
     dbus_message_unref(msg);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Get reply */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -356,7 +356,7 @@ dbus_client_get_loop_mode() {
 
 void
 dbus_client_set_loop_mode(LoopMode mode) {
-    char *s = "None";
+    char *s;
     switch (mode) {
         case LOOP_MODE_PLAYLIST:
             s = "Playlist";
@@ -364,7 +364,7 @@ dbus_client_set_loop_mode(LoopMode mode) {
         case LOOP_MODE_TRACK:
             s = "Track";
             break;
-        case LOOP_MODE_NONE:
+        default:
             s = "None";
             break;
     }
@@ -389,7 +389,7 @@ dbus_client_tracklist_get_tracks(char ***out, int *count) {
     DBusMessage *reply = NULL;
     dbus_client_get_property_reply("org.mpris.MediaPlayer2.TrackList", "Tracks", &reply);
 
-    DBusMessageIter iter, var, arr, val;
+    DBusMessageIter iter, var, arr;
     dbus_message_iter_init(reply, &iter);
     dbus_message_iter_recurse(&iter, &var);
     dbus_message_iter_recurse(&var, &arr);
@@ -421,13 +421,13 @@ dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out) {
     }
 
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
     dbus_message_unref(msg);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Get reply */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -477,9 +477,6 @@ dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder orde
         case ORDER_PLAYED:
             order_str = "Played";
             break;
-        case ORDER_USER:
-            order_str = "User";
-            break;
         default:
             order_str = "User";
             break;
@@ -494,12 +491,12 @@ dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder orde
                              DBUS_TYPE_INVALID);
 
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
@@ -579,18 +576,18 @@ dbus_client_activate_playlist(const char *id /* DBus object path */){
     dbus_message_append_args(msg, DBUS_TYPE_OBJECT_PATH, &id, DBUS_TYPE_INVALID);
 
     dbus_uint32_t serial = 0;
-    dbus_connection_send(conn, msg, &serial);
+    dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
     for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
-        dbus_connection_read_write(conn, 0);
-        reply = dbus_connection_pop_message(conn);
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
         usleep(10000);
     }
     dbus_message_unref(msg);
-    return !!reply;
+    return reply != NULL;
 }
 
 void
@@ -616,16 +613,16 @@ print_properties(FILE *stream, PlayerProperties *properties) {
             status_indicator = "■";
             break;
     }
-    char *loop_status = "No";
+    char *loop_status;
     switch (properties->loop_mode) {
-        case LOOP_MODE_NONE:
-            loop_status = "No";
-            break;
         case LOOP_MODE_PLAYLIST:
             loop_status = "Playlist";
             break;
         case LOOP_MODE_TRACK:
             loop_status = "Track";
+            break;
+        default:
+            loop_status = "No";
             break;
     }
     if (properties->playback_status == PBS_STOPPED) {

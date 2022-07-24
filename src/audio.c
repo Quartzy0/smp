@@ -2,6 +2,8 @@
 // Created by quartzy on 4/30/22.
 //
 
+#ifndef PIPEWIRE_BACKEND
+
 #include <portaudio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -181,3 +183,5 @@ int clean_audio() {
     free(current_file);
     return 0;
 }
+
+#endif

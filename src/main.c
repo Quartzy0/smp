@@ -10,7 +10,6 @@
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <getopt.h>
 #include "config.h"
 #include "cli.h"
 

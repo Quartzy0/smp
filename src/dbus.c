@@ -481,7 +481,7 @@ void getall_mediaplayer_player(DBusMessage *msg) {
             break;
     }
     dbus_bool_t s = (dbus_bool_t) shuffle;
-    add_dict_entry(&dict, "Shuffle", (void *) s, DBUS_TYPE_BOOLEAN);
+    add_dict_entry_p(&dict, "Shuffle", &s, DBUS_TYPE_BOOLEAN);
     add_dict_entry_p(&dict, "Volume", &volume, DBUS_TYPE_DOUBLE);
 
     //Metadata

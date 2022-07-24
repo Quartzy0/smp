@@ -65,7 +65,7 @@ extern bool shuffle;
 int read_url(const char *url, Response *response, struct curl_slist *headers);
 
 // https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
-char *urlencode(char *src);
+char *urlencode(const char *src);
 
 void clean_encode_curl();
 
