@@ -6,11 +6,49 @@ does not register itself as a spotify device and does not play the tracks direct
 tracks in a playlist/album and downloads them to your computer from [invidious](https://invidious.io/) (an open source alternative front-end to YouTube).
 It is also fully implements the MPRIS DBUS standards, meaning it can be controlled using utilities like [playerctl](https://github.com/altdesktop/playerctl) or [mpris-control](https://github.com/BlackDex/mpris-control).
 
+* [Compiling](#compiling)
+* [Using the CLI](#using-the-cli)
+  * [Starting the daemon](#starting-the-daemon)
+  * [Getting playback information](#getting-playback-information)
+  * [Controlling playback](#controlling-playback)
+  * [List tracks in current context](#list-tracks-in-current-context)
+  * [Search](#search)
+  * [Playing from a URL](#playing-from-a-url)
+  * [Saved playlists](#saved-playlists)
+  * [Killing the daemon](#killing-the-daemon)
+* [Configuration file](#configuration-file)
+  * [Contents](#contents)
+
 ### Features
  - Open spotify playlist/album URIs
  - Continue playing after the playlist/album has ended using spotify's recommendations API
  - Full MPRIS implementation
  - Control daemon through a CLI
+
+### Compiling
+First, clone the git repository to obtain the source code and cd into the cloned repository:
+```shell
+git clone https://github.com/Quartzy0/smp && cd smp
+```
+Then create a directory for the build files and cd into it:
+```shell
+mkdir build && cd build
+```
+In this directory execute the following commands to build the project:
+```shell
+cmake -DCMAKE_BUILD_TYPE=Release ..
+```
+Building smp using this command will cause it to automatically check if PipeWire is installed
+and use it as opposed to the default PortAudio backend. If you want to you the PortAudio backend regardless,
+you can use the following command:
+```shell
+cmake -DCMAKE_BUILD_TYPE=Release -DNO_PIPEWIRE=ON ..
+```
+Lastly, compile the program:
+```shell
+make
+```
+Once the compilation is finished, the executable, named `smp` will be in the build directory.
 
 ### Using the CLI
 #### Starting the daemon
@@ -145,11 +183,11 @@ file at `$HOME/.config/smp/smp.json`
     
     //A string array of piped instances to use. These are used to search
     //for tracks on YouTube and YouTube Music but not to download the tracks.
-    //By default it is populated by piped instances from https://piped-instances.kavin.rocks/
+    //By default, it is populated by piped instances from https://piped-instances.kavin.rocks/
     "piped_api_instances": [],
     
     //A string array of invidious/piped instances to use for downloading tracks.
-    //By default it is populated by invidious instances from https://api.invidious.io/instances.json
+    //By default, it is populated by invidious instances from https://api.invidious.io/instances.json
     "download_instances": []
 }
 ```
