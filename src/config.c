@@ -91,6 +91,7 @@ load_config() {
     if (config_home != config_home_tmp) free(config_home);
 
     cJSON *config_root = NULL;
+    char *data = NULL;
     if (access(config_file, R_OK)) {
         printf("[config] No config file found, using defaults.\n");
         goto no_file;
@@ -102,7 +103,7 @@ load_config() {
     fseek(fp, 0, SEEK_END);
     long size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    char *data = (char *) malloc(size + 1);
+    data = (char *) malloc(size + 1);
     fread(data, 1, size, fp);
     data[size] = '\0';
     fclose(fp);

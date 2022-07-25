@@ -28,7 +28,7 @@ It is also fully implements the MPRIS DBUS standards, meaning it can be controll
 ### Compiling
 First, clone the git repository to obtain the source code and cd into the cloned repository:
 ```shell
-git clone https://github.com/Quartzy0/smp && cd smp
+git clone --recursive https://github.com/Quartzy0/smp && cd smp
 ```
 Then create a directory for the build files and cd into it:
 ```shell

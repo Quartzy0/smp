@@ -257,6 +257,8 @@ search(const char *query_in, Track **tracks, size_t *tracks_count, PlaylistInfo 
 int
 track_by_id(const char *id, Track **track) {
     ensure_token();
+    int attempts = 3;
+    retry_req:;
     struct curl_slist *list = NULL;
 
     list = curl_slist_append(list, "Host: api-partner.spotify.com");
@@ -292,8 +294,15 @@ track_by_id(const char *id, Track **track) {
 
     cJSON *root = cJSON_ParseWithLength(response.data, response.size);
 
-    if (cJSON_HasObjectItem(root, "errors")) {
-        fprintf(stderr, "[spotify] Error occurred when trying to get track info\n");
+    if (cJSON_HasObjectItem(root, "error")) {
+        cJSON *err = cJSON_GetObjectItem(root, "error");
+        int status = cJSON_GetObjectItem(err, "status")->valueint;
+        if (status == 401 && attempts-- != 0){
+            get_token();
+            goto retry_req;
+        }
+        fprintf(stderr, "[spotify] Error occurred when trying to get track info: %s\n", cJSON_GetStringValue(
+                cJSON_GetObjectItem(err, "message")));
         cJSON_Delete(root);
         return 1;
     }
@@ -301,9 +310,9 @@ track_by_id(const char *id, Track **track) {
     cJSON *data = cJSON_GetObjectItem(root, "data");
     cJSON *trackJson = cJSON_GetObjectItem(data, "trackUnion");
 
-    if (!strcmp(cJSON_GetObjectItem(trackJson, "__typename")->valuestring, "NotFound")) {
+    if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(trackJson, "__typename")), "NotFound")) {
         fprintf(stderr, "[spotify] Error occurred when trying to get track info: %s\n",
-                cJSON_GetObjectItem(trackJson, "message")->valuestring);
+                cJSON_GetStringValue(cJSON_GetObjectItem(trackJson, "message")));
         cJSON_Delete(root);
         return 1;
     }
