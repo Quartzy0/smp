@@ -14,7 +14,7 @@
 #include <errno.h>
 #include <semaphore.h>
 
-#define ERR_NULL(p, r) if (!p){ fprintf(stderr, "Error occurred in " __FILE__ ":%d : %s\n", __LINE__, strerror(errno)); return r; }
+#define ERR_NULL(p, r) if (!(p)){ fprintf(stderr, "Error occurred in " __FILE__ ":%d : %s\n", __LINE__, strerror(errno)); return r; }
 
 int status;
 bool started;
@@ -33,6 +33,7 @@ typedef struct Data {
     int16_t *buffer;
     int channels;
     int sample_rate;
+    FILE *fp;
 } Data;
 
 static void on_process(void *userdata) {
@@ -42,7 +43,7 @@ static void on_process(void *userdata) {
     unsigned int i, n_frames, stride;
     int16_t *dst;
 
-    if (data->offset >= data->buffer_size) return;
+    if ((data->offset >= data->buffer_size && data->buffer) || (!data->buffer && !data->fp)) return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
         pw_log_warn("out of buffers: %m");
@@ -61,27 +62,55 @@ static void on_process(void *userdata) {
             rear.type = ACTION_TRACK_OVER;
             last_rear.position = 1;
             sem_post(&state_change_lock);
-            return;
+            goto finish;
         }
     }
 
     stride = sizeof(int16_t) * data->channels;
     n_frames = buf->datas[0].maxsize / stride;
 
-    size_t num_read = n_frames < data->buffer_size - data->offset ? n_frames : data->buffer_size - data->offset;
-    const double volumeDb = -6.0;
-    const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
-    for (i = 0; i < num_read * data->channels; ++i) {
-        dst[i] = (int16_t) ((float) data->buffer[data->offset * data->channels + i] * volumeMultiplier);
-    }
-    data->offset += num_read;
-    if (data->offset >= data->buffer_size) {
-        rear.type = ACTION_TRACK_OVER;
-        last_rear.position = 1;
-        sem_post(&state_change_lock);
-        return;
+    size_t num_read;
+    if (data->fp){
+        int16_t buffer[n_frames * data->channels];
+        num_read = fread(buffer, stride, n_frames, data->fp);
+        if (!num_read){
+            if (ferror(data->fp)){
+                fprintf(stderr, "[audio] Error occurred while reading audio stream: %s\n", strerror(errno));
+                rear.type = ACTION_TRACK_OVER;
+                last_rear.position = 1;
+                sem_post(&state_change_lock);
+                pclose(data->fp);
+                goto finish;
+            } else if (feof(data->fp)){
+                rear.type = ACTION_TRACK_OVER;
+                last_rear.position = 1;
+                sem_post(&state_change_lock);
+                pclose(data->fp);
+                goto finish;
+            }
+        }
+        const double volumeDb = -6.0;
+        const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
+        for (i = 0; i < num_read * data->channels; ++i) {
+            dst[i] = (int16_t) ((float) buffer[i] * volumeMultiplier);
+        }
+    }else {
+        num_read = n_frames < data->buffer_size - data->offset ? n_frames : data->buffer_size - data->offset;
+        const double volumeDb = -6.0;
+        const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
+        for (i = 0; i < num_read * data->channels; ++i) {
+            dst[i] = (int16_t) ((float) data->buffer[data->offset * data->channels + i] * volumeMultiplier);
+        }
+        data->offset += num_read;
+        if (data->offset >= data->buffer_size) {
+            rear.type = ACTION_TRACK_OVER;
+            last_rear.position = 1;
+            sem_post(&state_change_lock);
+            goto finish;
+        }
     }
 
+    finish:
     buf->datas[0].chunk->offset = 0;
     buf->datas[0].chunk->stride = (int) stride;
     buf->datas[0].chunk->size = n_frames * stride;
@@ -143,6 +172,19 @@ int start() {
 }
 
 int
+set_pcm_stream(FILE *fp) {
+    if (current_file) free(current_file);
+    current_file = NULL;
+
+    printf("[audio] Playing from PCM stream\n");
+    free(data.buffer);
+    memset(&data, 0, sizeof(data));
+
+    data.fp = fp;
+    data.channels = 2;
+}
+
+int
 set_file(const char *filename) {
     if (current_file && !strcmp(filename, current_file)) {
         printf("[audio] File '%s' is already loaded. Reusing buffer.\n", filename);
@@ -156,8 +198,8 @@ set_file(const char *filename) {
 
     /* Open the soundfile */
     data.buffer_size = stb_vorbis_decode_filename(filename, &data.channels, &data.sample_rate, &data.buffer);
-    if (!data.buffer_size) {
-        fprintf(stderr, "Couldn't open %s", filename);
+    if (!data.buffer_size || !data.buffer) {
+        fprintf(stderr, "[audio] Couldn't open %s", filename);
         return 1;
     }
     frames = data.buffer_size;

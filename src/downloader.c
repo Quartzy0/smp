@@ -40,8 +40,11 @@ search_and_download(void *userp) {
         fprintf(stderr, "[downloader] Retrying. %d attempts left\n", attempts);
         goto search_part;
     }
+
+    char *video_id = strrchr(video_url, '=')+1;
+    rek_mkdir(params->path_out);
     download_part:
-    if (download_from_id(random_download_instance, video_url, params->path_out, params->track->spotify_id)) {
+    if (download_from_id(random_download_instance, params->path_out, video_id, params->track->spotify_id)) {
         attempts--;
         if (attempts <= 0) {
             fprintf(stderr, "[downloader] Could not download after 3 retries.\n");
@@ -57,6 +60,55 @@ search_and_download(void *userp) {
     free(video_url);
     free(params);
     return NULL;
+}
+
+FILE *
+search_and_get_pcm(DownloadParams *params){
+    char *video_url = NULL;
+
+    const size_t artist_len = strlen(params->track->artist_escaped);
+    const size_t name_len = strlen(params->track->spotify_name_escaped);
+    char *query = malloc(artist_len + 3 + name_len + 1);
+    memcpy(query, params->track->artist_escaped, artist_len);
+    query[artist_len] = '%';
+    query[artist_len + 1] = '2';
+    query[artist_len + 2] = '0';
+    memcpy(query + 3 + artist_len, params->track->spotify_name_escaped, name_len);
+    query[artist_len + 3 + name_len] = 0;
+
+    int attempts = 3;
+    search_part:
+    if (search_for_track(random_api_instance, &video_url, query, params->track->spotify_name, params->track->artist)) {
+        attempts--;
+        if (attempts <= 0) {
+            fprintf(stderr, "[downloader] Could not find result after 3 retries.\n");
+            params->track->download_state = DS_DOWNLOAD_FAILED;
+            syscall(SYS_futex, &params->track->download_state, FUTEX_WAKE, INT_MAX, NULL, 0, 0);
+            return NULL;
+        }
+        fprintf(stderr, "[downloader] Retrying. %d attempts left\n", attempts);
+        goto search_part;
+    }
+
+    char *video_id = strrchr(video_url, '=')+1;
+    FILE *pcm;
+    download_part:
+    if (!(pcm = get_pcm_stream_from_id(random_download_instance, params->path_out, video_id, params->track->spotify_id))) {
+        attempts--;
+        if (attempts <= 0) {
+            fprintf(stderr, "[downloader] Could not download after 3 retries.\n");
+            params->track->download_state = DS_DOWNLOAD_FAILED;
+            syscall(SYS_futex, &params->track->download_state, FUTEX_WAKE, INT_MAX, NULL, 0, 0);
+            return NULL;
+        }
+        fprintf(stderr, "[downloader] Error when downloading. Retrying. %d attempts left\n", attempts);
+        goto download_part;
+    }
+    params->track->download_state = DS_DOWNLOADED;
+    syscall(SYS_futex, &params->track->download_state, FUTEX_WAKE, INT_MAX, NULL, 0, 0);
+    free(video_url);
+    free(params);
+    return pcm;
 }
 
 int
@@ -237,27 +289,37 @@ search_for_track(char *instance, char **url_out, char *query, char *title, char 
 }
 
 int
-download_from_id(char *instance, char *url_in, char *path_out, char *file_name) {
+download_from_id(char *instance, char *path_out, char *id, char *save_name) {
     const size_t instance_len = strlen(instance);
-    const size_t url_in_len = strlen(url_in);
     const size_t path_out_len = strlen(path_out);
-    const size_t file_name_len = strlen(file_name);
+    const size_t id_len = strlen(id);
+    const size_t save_name_len = strlen(save_name);
 
-    size_t url_len = instance_len + url_in_len;
-    char *url = malloc(instance_len + url_in_len + 1);
-    memcpy(url, instance, instance_len);
-    memcpy(url + instance_len, url_in, url_in_len);
-    url[instance_len + url_in_len] = 0;
+    printf("[downloader] Downloading from youtube with id: %s\n", id);
 
-    printf("[downloader] Downloading from url %s\n", url);
-
-    char *cmd = malloc((101 + file_name_len + path_out_len + url_len + 1) * sizeof(char));
-    snprintf(cmd, (101 + file_name_len + path_out_len + url_len + 1) * sizeof(char),
-             "yt-dlp --no-warnings --quiet -x --no-keep-video --audio-format vorbis --output \"%s.%%(ext)s\" --paths %s \"%s\"",
-             file_name, path_out, url);
+    char *cmd = malloc((172 + instance_len + id_len + save_name_len + path_out_len + 1) * sizeof(char));
+    snprintf(cmd, (172 + instance_len + id_len + save_name_len + path_out_len + 1) * sizeof(char),
+             "ffmpeg -headers \"Accept-Language: en-US,en;q=0.5\\r\\nAccept-Encoding: gzip, deflate, br\\r\\n\" -i \"%s/latest_version?id=%s&itag=249&local=true\" -loglevel error -ac 2 -f ogg \"%s%s.ogg\"",
+             instance, id, path_out, save_name);
     int status = system(cmd);
-    free(url);
     free(cmd);
     printf("[downloader] Finished downloading\n");
     return WEXITSTATUS(status);
+}
+
+FILE*
+get_pcm_stream_from_id(char *instance, char *path_out, char *id, char *save_name) {
+    const size_t instance_len = strlen(instance);
+    const size_t path_out_len = strlen(path_out);
+    const size_t id_len = strlen(id);
+    const size_t save_name_len = strlen(save_name);
+
+    char *cmd = malloc((215 + instance_len + path_out_len + save_name_len + id_len + 1) * sizeof(char));
+    snprintf(cmd, (215 + instance_len + path_out_len + save_name_len + id_len + 1) * sizeof(char),
+             "ffmpeg -headers \"Accept-Language: en-US,en;q=0.5\\r\\nAccept-Encoding: gzip, deflate, br\\r\\n\" -i \"%s/latest_version?id=%s&itag=249&local=true\" -loglevel error -acodec pcm_s16le -ac 2 -f s16le \"pipe:\" -ac 2 -f ogg \"%s%s.ogg\"",
+             instance, id, path_out, save_name);
+    printf("[downloader] Getting PCM stream from id: %s with command: %s\n", id, cmd);
+    FILE *fp = popen(cmd, "r");
+    free(cmd);
+    return fp;
 }

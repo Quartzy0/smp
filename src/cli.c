@@ -91,7 +91,7 @@ playback(int argc, char **argv) {
                 if (init_dbus_client())
                     break;
                 LoopMode loop_mode1 = dbus_client_get_loop_mode();
-                loop_mode1 = (loop_mode + 1) % LOOP_MODE_LAST;
+                loop_mode1 = (loop_mode1 + 1) % LOOP_MODE_LAST;
                 dbus_client_set_loop_mode(loop_mode1);
                 char *loop_mode_string;
                 switch (loop_mode1) {

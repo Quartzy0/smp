@@ -6,6 +6,7 @@
 #define SMP_AUDIO_H
 
 #include <stdbool.h>
+#include <stdio.h>
 
 extern int status;
 extern bool started;
@@ -20,6 +21,8 @@ extern int audio_samplerate;
 int init();
 
 int set_file(const char *filename);
+
+int set_pcm_stream(FILE *fp);
 
 int start();
 

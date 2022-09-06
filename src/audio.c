@@ -109,8 +109,9 @@ set_file(const char *filename) {
 
     /* Open the soundfile */
     data.buffer_size = stb_vorbis_decode_filename(filename, &data.channels, &data.sample_rate, &data.buffer);
-    if (!data.buffer_size) {
+    if (!data.buffer_size || !data.buffer) {
         fprintf(stderr, "Couldn't open %s", filename);
+        return 1;
     }
     frames = data.buffer_size;
     audio_samplerate = data.sample_rate;

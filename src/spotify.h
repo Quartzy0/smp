@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define SPOTIFY_ID_LEN 22
 #define SPOTIFY_ID_LEN_NULL (SPOTIFY_ID_LEN+1)
@@ -42,8 +43,6 @@ typedef struct PlaylistInfo {
     uint32_t track_count;
 } PlaylistInfo;
 
-extern char *authHeader;
-
 void get_token();
 
 void ensure_token();
@@ -61,7 +60,7 @@ void free_tracks(Track *track, size_t count);
 
 void free_playlist(PlaylistInfo *playlist);
 
-void download_track(Track *track, bool block);
+void download_track(Track *track, bool block, FILE **pcm);
 
 void track_filepath(Track *track, char **out);
 

@@ -32,7 +32,6 @@ void *
 prepare_recommendations(void *userp) {
     struct RecommendationParams *params = (struct RecommendationParams *) userp;
     printf("[ctrl - recommendations] Looking for recommendations\n");
-    next_track_count = -1;
     get_recommendations_from_tracks(params->tracks, params->track_count, 30, params->next_tracks,
                                     params->next_track_count);
     printf("[ctrl - recommendations] Done. Wake: %ld\n",
@@ -44,11 +43,13 @@ prepare_recommendations(void *userp) {
 void
 redo_audio() {
     printf("[ctrl] Attempting to download new tracks\n");
+    FILE *pcm = NULL;
     for (int i = 0; i < preload_amount; ++i) {
         Track *track = NULL;
         if (track_index + i >= track_count) {
             if (loop_mode == LOOP_MODE_NONE) {
                 if (next_track_count == 0) {
+                    next_track_count = -1;
                     struct RecommendationParams *params = malloc(sizeof(*params));
                     params->next_tracks = &next_tracks;
                     params->next_track_count = &next_track_count;
@@ -65,28 +66,34 @@ redo_audio() {
             track = &tracks[track_index + i];
         }
         loop:
-        while (track->download_state == DS_DOWNLOADING) {
-            printf("[ctrl] Sleep sleep... (downloading)\n");
-            if (syscall(SYS_futex, &track->download_state, FUTEX_WAIT, DS_DOWNLOADING, NULL,
-                        0, 0) == -1) {
-                fprintf(stderr, "Error when waiting: %s\n", strerror(errno));
-                break;
-            }
+        download_track(track, !i, &pcm);
+    }
+    while (tracks[track_index].download_state == DS_DOWNLOADING) {
+        printf("[ctrl] Sleep sleep... (downloading)\n");
+        if (syscall(SYS_futex, &tracks[track_index].download_state, FUTEX_WAIT, DS_DOWNLOADING, NULL,
+                    0, 0) == -1) {
+            fprintf(stderr, "Error when waiting: %s\n", strerror(errno));
+            break;
         }
-        download_track(track, !i);
     }
     if (tracks[track_index].download_state ==
         DS_DOWNLOAD_FAILED) { //Go to next track if this track couldn't be downloaded
         rear.type = ACTION_POSITION_RELATIVE;
         last_rear.position = 1;
         sem_post(&state_change_lock);
+        start();
+        return;
     }
     printf("[ctrl] Playing '%s' by %s\n", tracks[track_index].spotify_name,
            tracks[track_index].artist);
-    char *file = NULL;
-    track_filepath(&tracks[track_index], &file);
-    set_file(file);
-    free(file);
+    if (pcm){
+        set_pcm_stream(pcm);
+    }else{
+        char *file = NULL;
+        track_filepath(&tracks[track_index], &file);
+        if (set_file(file)) return;
+        free(file);
+    }
     start();
     play();
 }
