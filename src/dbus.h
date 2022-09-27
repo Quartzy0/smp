@@ -8,14 +8,13 @@
 #include "spotify.h"
 #include <semaphore.h>
 
-extern sem_t state_change_lock;
 extern PlaylistInfo cplaylist;
 extern size_t track_index;
 extern Track *tracks;
 extern size_t track_count;
 
-int init_dbus();
+void * init_dbus(void *arg);
 
-void handle_message();
+void handle_message(struct smp_context *ctx);
 
 #endif //SMP_DBUS_H

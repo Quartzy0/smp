@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <event2/bufferevent.h>
+#include "util.h"
 
 #define SPOTIFY_ID_LEN 22
 #define SPOTIFY_ID_LEN_NULL (SPOTIFY_ID_LEN+1)
@@ -12,6 +14,9 @@
 #define SPOTIFY_URI_LEN_NULL (SPOTIFY_URI_LEN+1)
 #define PLAYLIST_NAME_LEN (SPOTIFY_ID_LEN+1)
 #define PLAYLIST_NAME_LEN_NULL (PLAYLIST_NAME_LEN+1)
+#define CONNECTION_POOL_MAX 10
+#define SPOTIFY_MAX_INSTANCES 10
+#define SPOTIFY_PORT 5394
 
 typedef enum DownloadState {
     DS_NOT_DOWNLOADED,
@@ -43,9 +48,47 @@ typedef struct PlaylistInfo {
     uint32_t track_count;
 } PlaylistInfo;
 
+enum spotify_packet_type {
+    MUSIC_DATA = 0,
+    MUSIC_INFO = 1,
+    PLAYLIST_INFO = 2,
+    ALBUM_INFO = 3,
+    RECOMMENDATIONS = 4
+};
+
+enum error_type {
+    ET_NO_ERROR,
+    ET_SPOTIFY,
+    ET_HTTP,
+    ET_FULL
+};
+
+struct spotify_state{
+    struct connection{
+        struct bufferevent *bev;
+        bool busy;
+
+        enum spotify_packet_type last_packet;
+        size_t expecting;
+        size_t progress;
+        struct evbuffer *transfer_buf;
+        struct decode_context ctx;
+
+        char *error_buffer;
+        enum error_type error_type;
+    } connections[CONNECTION_POOL_MAX];
+    size_t connections_len;
+    struct event_base *base;
+    char *instances[SPOTIFY_MAX_INSTANCES];
+};
+
 void get_token();
 
 void ensure_token();
+
+void * init_spotify(void *state);
+
+int write_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf);
 
 int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
            PlaylistInfo **albums, size_t *album_count);

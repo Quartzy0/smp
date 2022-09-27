@@ -12,7 +12,7 @@
 #include "util.h"
 #include "dbus.h"
 #include <errno.h>
-#include <semaphore.h>
+#include <unistd.h>
 
 #define ERR_NULL(p, r) if (!(p)){ fprintf(stderr, "Error occurred in " __FILE__ ":%d : %s\n", __LINE__, strerror(errno)); return r; }
 
@@ -33,7 +33,8 @@ typedef struct Data {
     int16_t *buffer;
     int channels;
     int sample_rate;
-    FILE *fp;
+    struct evbuffer *audio_buf;
+    struct smp_context *ctx;
 } Data;
 
 static void on_process(void *userdata) {
@@ -41,9 +42,9 @@ static void on_process(void *userdata) {
     struct pw_buffer *b;
     struct spa_buffer *buf;
     unsigned int i, n_frames, stride;
-    int16_t *dst;
+    float *dst;
 
-    if ((data->offset >= data->buffer_size && data->buffer) || (!data->buffer && !data->fp)) return;
+    if (!evbuffer_get_length(data->audio_buf)) return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
         pw_log_warn("out of buffers: %m");
@@ -59,18 +60,25 @@ static void on_process(void *userdata) {
         seek = 0;
         if (data->offset < 0) data->offset = 0;
         else if (data->offset >= data->buffer_size) {
-            rear.type = ACTION_TRACK_OVER;
-            last_rear.position = 1;
-            sem_post(&state_change_lock);
+            Action a = {.type = ACTION_TRACK_OVER};
+            a.position = 1;
+            write(data->ctx->action_fd[1], &a, sizeof(a));
             goto finish;
         }
     }
 
-    stride = sizeof(int16_t) * data->channels;
+    stride = sizeof(*dst) * data->channels;
     n_frames = buf->datas[0].maxsize / stride;
 
-    size_t num_read;
-    if (data->fp){
+    size_t num_read = evbuffer_remove(data->audio_buf, dst, buf->datas[0].maxsize);
+    const double volumeDb = -6.0;
+    const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
+    for (i = 0; i < num_read / sizeof(*dst); ++i) {
+        dst[i] *= volumeMultiplier;
+    }
+
+
+    /*if (data->fp){
         int16_t buffer[n_frames * data->channels];
         num_read = fread(buffer, stride, n_frames, data->fp);
         if (!num_read){
@@ -108,7 +116,7 @@ static void on_process(void *userdata) {
             sem_post(&state_change_lock);
             goto finish;
         }
-    }
+    }*/
 
     finish:
     buf->datas[0].chunk->offset = 0;
@@ -125,9 +133,12 @@ static const struct pw_stream_events stream_events = {
 
 Data data = {0,};
 
-int init() {
+void init(struct smp_context *ctx, struct evbuffer *audio_buf) {
     pw_init(NULL, NULL);
-    return 0;
+    data.ctx = ctx;
+    data.channels = 2;
+    data.sample_rate = 44100;
+    data.audio_buf = audio_buf;
 }
 
 int start() {
@@ -153,7 +164,7 @@ int start() {
 
     params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
                                            &SPA_AUDIO_INFO_RAW_INIT(
-                                                   .format = SPA_AUDIO_FORMAT_S16,
+                                                   .format = SPA_AUDIO_FORMAT_F32,
                                                    .channels = data.channels,
                                                    .rate = data.sample_rate));
 
@@ -180,7 +191,7 @@ set_pcm_stream(FILE *fp) {
     free(data.buffer);
     memset(&data, 0, sizeof(data));
 
-    data.fp = fp;
+//    data.fp = fp;
     data.channels = 2;
 }
 

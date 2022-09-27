@@ -5,11 +5,9 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <ctype.h>
+#include <unistd.h>
 #include "spotify.h"
 
-Action action_queue[QUEUE_MAX];
-unsigned queue_front = 0;
-unsigned queue_end = 0;
 LoopMode loop_mode = LOOP_MODE_NONE;
 bool shuffle = false;
 
@@ -171,4 +169,166 @@ FILE
         free(path0);
     }
     return fopen(path, mode);
+}
+
+int
+decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress) {
+//    static FILE *fp = NULL;
+//    if (!fp) fp = fopen("tmp", "w");
+    size_t buf_len = evbuffer_get_length(in);
+    switch (ctx->state) {
+        case START: {
+            ogg_sync_init(&ctx->oy);
+            ctx->state = HEADERS;
+            ctx->p = 0;
+        }
+        case HEADERS: {
+            if (ctx->p >= 3) {
+                if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
+                    fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
+                    exit(1);
+                }
+                vorbis_block_init(&ctx->vd, &ctx->vb);
+                ctx->state = DECODE;
+                ctx->p = 0;
+                goto decode;
+            }
+
+            char *buf = ogg_sync_buffer(&ctx->oy, buf_len);
+            size_t bytes = evbuffer_remove(in, buf, buf_len);
+            *progress += bytes;
+            ogg_sync_wrote(&ctx->oy, bytes);
+
+            int result = ogg_sync_pageout(&ctx->oy, &ctx->og);
+            if (result == 0)break; /* Need more data */
+
+            if (result == 1) {
+                if (ctx->p == 0) {
+                    ogg_stream_init(&ctx->os, ogg_page_serialno(&ctx->og));
+                    vorbis_info_init(&ctx->vi);
+                    vorbis_comment_init(&ctx->vc);
+                }
+
+                ogg_stream_pagein(&ctx->os, &ctx->og); /* we can ignore any errors here
+                                         as they'll also become apparent
+                                         at packetout */
+                while (ctx->p < 3) {
+                    result = ogg_stream_packetout(&ctx->os, &ctx->op);
+                    if (result == 0)break;
+                    if (result < 0) {
+                        /* Uh oh; data at some point was corrupted or missing!
+                           We can't tolerate that in a header.  Die. */
+                        fprintf(stderr, "Corrupt secondary header.  Exiting.\n");
+                        exit(1);
+                    }
+                    result = vorbis_synthesis_headerin(&ctx->vi, &ctx->vc, &ctx->op);
+                    if (result < 0) {
+                        fprintf(stderr, "Corrupt secondary header.  Exiting.\n");
+                        exit(1);
+                    }
+                    ctx->p++;
+                }
+            }
+
+            break;
+        }
+        case DECODE:
+        decode:
+        {
+            ctx->p = 0;
+            char *buf = ogg_sync_buffer(&ctx->oy, buf_len);
+            size_t bytes = evbuffer_remove(in, buf, buf_len);
+            *progress += bytes;
+            ogg_sync_wrote(&ctx->oy, bytes);
+
+            while (1) {
+                int result = ogg_sync_pageout(&ctx->oy, &ctx->og);
+                if (result == 0)break; /* need more data */
+                if (result < 0) { /* missing or corrupt data at this page position */
+                    fprintf(stderr, "Corrupt or missing data in bitstream; "
+                                    "continuing...\n");
+                } else {
+                    ogg_stream_pagein(&ctx->os, &ctx->og); /* can safely ignore errors at
+                                           this point */
+                    while (1) {
+                        result = ogg_stream_packetout(&ctx->os, &ctx->op);
+
+                        if (result == 0)break; /* need more data */
+                        if (result < 0) { /* missing or corrupt data at this page position */
+                            /* no reason to complain; already complained above */
+                        } else {
+                            /* we have a packet.  Decode it */
+                            float **pcm;
+                            float *pcmi = NULL;
+                            size_t pcmi_len = 0;
+                            int samples;
+
+                            if (vorbis_synthesis(&ctx->vb, &ctx->op) == 0) /* test for success! */
+                                vorbis_synthesis_blockin(&ctx->vd, &ctx->vb);
+                            /*
+
+                            **pcm is a multichannel float vector.  In stereo, for
+                            example, pcm[0] is left, and pcm[1] is right.  samples is
+                            the size of each channel.  Convert the float values
+                            (-1.<=range<=1.) to whatever PCM format and write it out */
+
+                            while ((samples = vorbis_synthesis_pcmout(&ctx->vd, &pcm)) > 0) {
+
+                                if (!pcmi) {
+                                    pcmi = calloc(samples * ctx->vi.channels, sizeof(*pcmi));
+                                    pcmi_len = samples * ctx->vi.channels;
+                                }
+                                if (pcmi_len < samples * ctx->vi.channels) {
+                                    float *tmp = realloc(pcmi, samples * ctx->vi.channels * sizeof(*tmp));
+                                    if (!tmp) {
+                                        fprintf(stderr, "realloc error");
+                                        exit(1);
+                                    }
+                                    pcmi = tmp;
+                                    pcmi_len = samples * ctx->vi.channels;
+                                }
+                                for (int i = 0; i < samples; ++i) {
+                                    for (int j = 0; j < ctx->vi.channels; ++j) {
+                                        pcmi[i*ctx->vi.channels+j] = pcm[j][i];
+                                    }
+                                }
+
+
+                                evbuffer_add(buf_out, pcmi, samples * ctx->vi.channels * sizeof(*pcmi));
+//                                fwrite(pcmi, samples * ctx->vi.channels * sizeof(*pcmi), 1, fp);
+
+                                ctx->p += samples * ctx->vi.channels * sizeof(*pcmi);
+
+                                vorbis_synthesis_read(&ctx->vd, samples); /* tell libvorbis how
+                                                      many samples we
+                                                      actually consumed */
+                            }
+                            free(pcmi);
+                        }
+                    }
+                    if (ogg_page_eos(&ctx->og))goto eos;
+                }
+            }
+            if (ctx->p == 0) ctx->zero_count++;
+            else ctx->zero_count = 0;
+            if (ctx->zero_count >= 5) {
+                goto eos; // Assume stream has ended if received 0 bytes more than 5 times in a row.
+            }
+            return 1;
+            eos:
+            ctx->state = EOS;
+            vorbis_block_clear(&ctx->vb);
+            vorbis_dsp_clear(&ctx->vd);
+            ogg_stream_clear(&ctx->os);
+            vorbis_comment_clear(&ctx->vc);
+            vorbis_info_clear(&ctx->vi);
+            ogg_sync_clear(&ctx->oy);
+            return 0;
+        }
+        case EOS: {
+            // Do nothing
+            return 0;
+        }
+    }
+    return 1;
 }

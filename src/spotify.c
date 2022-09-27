@@ -10,6 +10,9 @@
 #include "../lib/cjson/cJSON.h"
 #include <errno.h>
 #include <dirent.h>
+#include <event2/event.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
 #include "config.h"
 #include "downloader.h"
 
@@ -955,4 +958,89 @@ get_recommendations_from_tracks(Track *tracks, size_t track_count, size_t limit,
     free(artists);
     return get_recommendations(seed_tracks, track_amount, seed_artists, artist_count, NULL, 0, limit, tracksOut,
                                track_count_out);
+}
+
+#define ERROR_ENTRY(x) [x]=#x
+
+static const char *err_c[] = {
+        ERROR_ENTRY(ET_NO_ERROR),
+        ERROR_ENTRY(ET_SPOTIFY),
+        ERROR_ENTRY(ET_HTTP),
+        ERROR_ENTRY(ET_FULL),
+};
+
+struct connection *
+spotify_connect(struct spotify_state *spotify){
+    printf("[spotify] Creating spotify connection\n");
+    size_t i;
+    for (i = 0; i < spotify->connections_len; ++i) {
+        if (spotify->connections[i].bev && !spotify->connections[i].busy) return &spotify->connections[i];
+    }
+    if (spotify->connections_len >= CONNECTION_POOL_MAX) return NULL;
+    printf("[spotify] Creating new connection to %s\n", spotify->instances[i]);
+    spotify->connections_len++;
+    spotify->connections[i].bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_enable(spotify->connections[i].bev, EV_READ|EV_WRITE);
+    if(bufferevent_socket_connect_hostname(spotify->connections[i].bev, NULL, AF_UNSPEC, spotify->instances[i], SPOTIFY_PORT) != 0){
+        bufferevent_free(spotify->connections[i].bev);
+        return NULL;
+    }
+    return &spotify->connections[i];
+}
+
+void
+track_data_read_cb(struct bufferevent *bev, void *arg){
+    struct connection *conn = (struct connection*) arg;
+    struct evbuffer *input = bufferevent_get_input(bev);
+    if (!conn->expecting){
+        uint8_t *data = evbuffer_pullup(input, 9);
+        if (!data) return; // Not enough data yet
+        conn->expecting = *((size_t*) &data[1]);
+        if (data[0] != ET_NO_ERROR) { // Error occurred
+            conn->error_buffer = calloc(conn->expecting + 1, sizeof(*conn->error_buffer));
+        }else {
+            conn->error_buffer = NULL;
+        }
+        conn->error_type = data[0];
+        printf("[spotify] Receiving data: %s\n", err_c[conn->error_type]);
+        evbuffer_drain(input, 9);
+    }
+    if (conn->error_buffer){
+        conn->progress += evbuffer_remove(input, &conn->error_buffer[conn->progress], conn->expecting-conn->progress);
+        if (conn->expecting == conn->progress){
+            fprintf(stderr, "[spotify] Received error from smp backend %s: %s\n", err_c[conn->error_type], conn->error_buffer);
+            free(conn->error_buffer);
+            conn->error_buffer = NULL;
+        }
+    }else{
+        if (!decode_vorbis(input, conn->transfer_buf, &conn->ctx, &conn->progress)){ // Stream is over
+            conn->busy = false;
+            memset(&conn->ctx, 0, sizeof(conn->ctx));
+            printf("[spotify] End of stream\n");
+        }
+//        conn->progress += evbuffer_write(input, conn->transfer_fd);
+        if (conn->expecting == conn->progress){
+            printf("[spotify] All data received\n");
+        }
+    }
+}
+
+int
+write_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf){
+    struct connection *conn = spotify_connect(spotify);
+    if (!conn) return -1;
+
+    char data[23];
+    data[0] = MUSIC_DATA;
+    memcpy(&data[1], id, sizeof(data)-1);
+    conn->last_packet = MUSIC_DATA;
+    conn->progress = 0;
+    conn->expecting = 0;
+    conn->transfer_buf = buf;
+    conn->busy = true;
+    memset(&conn->ctx, 0, sizeof(conn->ctx));
+
+    if(bufferevent_write(conn->bev, data, sizeof(data)) != 0) return -1;
+    bufferevent_setcb(conn->bev, track_data_read_cb, NULL, NULL, conn);
+    return 0;
 }

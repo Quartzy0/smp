@@ -24,19 +24,20 @@ DBusError err;
 
 #define CHECK_TYPE(args, type) if (dbus_message_iter_get_arg_type(args)!=(type)){ fprintf(stderr, "[dbus] Invalid argument type\n");return; }
 
-int
-init_dbus() {
+void *
+init_dbus(void *arg) {
+    struct smp_context *ctx = (struct smp_context*) arg;
     dbus_error_init(&err);
     conn = dbus_bus_get(DBUS_BUS_SESSION, &err);
 
     if (dbus_error_is_set(&err)) {
         fprintf(stderr, "[dbus] Connection Error (%s)\n", err.message);
         dbus_error_free(&err);
-        return 1;
+        return NULL;
     }
     if (NULL == conn) {
         fprintf(stderr, "[dbus] Connection Null\n");
-        return 1;
+        return NULL;
     }
 
     // request our name on the bus and make sure there is only one version of this code running
@@ -44,14 +45,14 @@ init_dbus() {
     if (dbus_error_is_set(&err)) {
         fprintf(stderr, "[dbus] Name Error (%s)\n", err.message);
         dbus_error_free(&err);
-        return 1;
+        return NULL;
     }
     if (DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER != name_request) {
         fprintf(stderr, "[dbus] Not Primary Owner (%d)\n", name_request);
-        return 1;
+        return NULL;
     }
 
-    return 0;
+    handle_message(ctx);
 }
 
 void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, int type) {
@@ -637,24 +638,24 @@ set_values_player(const char *property, DBusMessageIter *args) {
 }
 
 // If we recieve a player command, output the magic word to make our extension do it
-int check_player_command(DBusMessage *msg) {
+int check_player_command(DBusMessage *msg, struct smp_context *ctx) {
     if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Pause")) {
-        rear.type = ACTION_PAUSE;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_PAUSE};
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Play")) {
-        rear.type = ACTION_PLAY;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_PLAY};
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "PlayPause")) {
-        rear.type = ACTION_PLAYPAUSE;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_PLAYPAUSE};
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Next")) {
-        rear.type = ACTION_POSITION_RELATIVE;
-        last_rear.position = 1;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_POSITION_RELATIVE};
+        a.position = 1;
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Previous")) {
-        rear.type = ACTION_POSITION_RELATIVE;
-        last_rear.position = -1;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_POSITION_RELATIVE};
+        a.position = -1;
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "OpenUri")) {
         const char *uri = NULL;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_STRING, &uri, DBUS_TYPE_INVALID)) {
@@ -665,31 +666,30 @@ int check_player_command(DBusMessage *msg) {
             return 0;
         }
 
-        Action *a = &rear;
-        a->type = id_from_url(uri, a->id);
+        Action a = {.type = id_from_url(uri, a.id)};
 
-        sem_post(&state_change_lock);
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2", "Quit")) {
         running = 0;
-        rear.type = ACTION_QUIT;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_QUIT};
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Stop")) {
-        rear.type = ACTION_STOP;
-        sem_post(&state_change_lock);
+        Action a = {.type = ACTION_STOP};
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Seek")) {
-        rear.type = ACTION_SEEK;
-        if (!dbus_message_get_args(msg, &err, DBUS_TYPE_INT64, &last_rear.position, DBUS_TYPE_INVALID)) {
+        Action a = {.type = ACTION_SEEK};
+        if (!dbus_message_get_args(msg, &err, DBUS_TYPE_INT64, &a.position, DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
                 dbus_error_free(&err);
                 fprintf(stderr, "[dbus] Error while decoding arguments: %s\n", err.message);
             }
             return 0;
         }
-        sem_post(&state_change_lock);
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "SetPosition")) {
-        rear.type = ACTION_SET_POSITION;
+        Action a = {.type = ACTION_SET_POSITION};
         char *obj;
-        if (!dbus_message_get_args(msg, &err, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INT64, &last_rear.position,
+        if (!dbus_message_get_args(msg, &err, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INT64, &a.position,
                                    DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
                 dbus_error_free(&err);
@@ -697,14 +697,14 @@ int check_player_command(DBusMessage *msg) {
             }
             return 0;
         }
-        sem_post(&state_change_lock);
+        write(ctx->action_fd[1], &a, sizeof(a));
     } else {
         return 0;
     }
     return 1;
 }
 
-int check_playlist_command(DBusMessage *msg) {
+int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
     if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "ActivatePlaylist")) {
         char *obj;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INVALID)) {
@@ -715,9 +715,10 @@ int check_playlist_command(DBusMessage *msg) {
             return 0;
         }
         size_t objLen = strlen(obj);
-        rear.type = obj[objLen - 1] == 'a' ? ACTION_ALBUM : ACTION_PLAYLIST;
-        memcpy(last_rear.id, &obj[objLen - 23], 22 * sizeof(char));
-        last_rear.id[22] = 0;
+        Action a = {.type = obj[objLen - 1] == 'a' ? ACTION_ALBUM : ACTION_PLAYLIST};
+        memcpy(a.id, &obj[objLen - 23], 22 * sizeof(char));
+        a.id[22] = 0;
+        write(ctx->action_fd[1], &a, sizeof(a));
         sem_post(&state_change_lock);
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "GetPlaylists")) {
         uint32_t index, max_count;
@@ -775,7 +776,7 @@ int check_playlist_command(DBusMessage *msg) {
     return 1;
 }
 
-int check_tracklist_command(DBusMessage *msg) {
+int check_tracklist_command(DBusMessage *msg, struct smp_context *ctx) {
     if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "GetTracksMetadata")) {
         size_t len = 20;
         char **objs = NULL;
@@ -822,8 +823,8 @@ int check_tracklist_command(DBusMessage *msg) {
         for (size_t i = 0; i < track_count; ++i) {
             const char *id = strrchr(obj, '/');
             if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
-            rear.type = ACTION_POSITION_ABSOLUTE;
-            last_rear.position = (int64_t) i;
+            Action a = {.type = ACTION_POSITION_RELATIVE, .position = (int64_t) i};
+            write(ctx->action_fd[1], &a, sizeof(a));
             sem_post(&state_change_lock);
             break;
         }
@@ -837,7 +838,7 @@ int check_tracklist_command(DBusMessage *msg) {
 }
 
 void
-handle_message() {
+handle_message(struct smp_context *ctx) {
     running = true;
     while (running) {
         // non-blocking read of the next available message
@@ -940,7 +941,7 @@ handle_message() {
                 }
             }
             // If this is a player command, run it and return nothing
-        } else if (check_player_command(msg)) {
+        } else if (check_player_command(msg, ctx)) {
             DBusMessage *reply = dbus_message_new_method_return(msg);
 
             // send the reply && flush the connection
@@ -950,7 +951,7 @@ handle_message() {
 
             // free the reply
             dbus_message_unref(reply);
-        } else if ((ret = check_playlist_command(msg))) {
+        } else if ((ret = check_playlist_command(msg, ctx))) {
             if (ret == 1) {
                 DBusMessage *reply = dbus_message_new_method_return(msg);
 
@@ -962,7 +963,7 @@ handle_message() {
                 // free the reply
                 dbus_message_unref(reply);
             }
-        } else if ((ret = check_tracklist_command(msg))) {
+        } else if ((ret = check_tracklist_command(msg, ctx))) {
             if (ret == 1) {
                 DBusMessage *reply = dbus_message_new_method_return(msg);
 

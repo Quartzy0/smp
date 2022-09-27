@@ -15,10 +15,11 @@ extern int64_t seek;
 extern size_t offset;
 extern size_t frames;
 extern int audio_samplerate;
+extern int audio_fd[2];
 
 #define FRAMES_PER_BUFFER   (512)
 
-int init();
+void init(struct smp_context *ctx, struct evbuffer *audio_buf);
 
 int set_file(const char *filename);
 

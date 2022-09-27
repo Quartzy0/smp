@@ -3,6 +3,13 @@
 
 #include <curl/curl.h>
 #include <stdbool.h>
+#include <vorbis/codec.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
+#include <time.h>
+
+#define TIMER_START(name) clock_t __gen_timer_ ##name = clock()
+#define TIMER_END(name) printf("Timer '" #name "' took %2.f ms\n", (double) (clock()-__gen_timer_##name) / (double) CLOCKS_PER_SEC * 1000.0)
 
 typedef struct Response {
     char *data;
@@ -47,17 +54,35 @@ struct ArtistQuantity {
     size_t appearances;
 };
 
-#define QUEUE_MAX 100
+struct smp_context{
+    struct event_base *base;
+    int action_fd[2];
+    struct evbuffer *audio_buf;
+    struct spotify_state *spotify;
+};
 
-extern Action action_queue[QUEUE_MAX];
-extern unsigned queue_front;
-extern unsigned queue_end;
+struct decode_context{
+    enum VorbisDecodeState {
+        START,
+        HEADERS,
+        DECODE,
+        EOS
+    } state;
 
-#define rear action_queue[++queue_end >= QUEUE_MAX ? (queue_end = 0) : queue_end]
+    ogg_sync_state oy; /* sync and verify incoming physical bitstream */
+    ogg_stream_state os; /* take physical pages, weld into a logical
+                          stream of packets */
+    ogg_page og; /* one Ogg bitstream page. Vorbis packets are inside */
+    ogg_packet op; /* one raw packet of data for decode */
 
-#define last_rear action_queue[queue_end]
-
-#define front action_queue[++queue_front >= QUEUE_MAX ? (queue_front = 0) : queue_front]
+    vorbis_info vi; /* struct that stores all the static vorbis bitstream
+                          settings */
+    vorbis_comment vc; /* struct that stores all the bitstream user comments */
+    vorbis_dsp_state vd; /* central working state for the packet->PCM decoder */
+    vorbis_block vb; /* local working space for packet->PCM decode */
+    int p;
+    int zero_count;
+};
 
 extern LoopMode loop_mode;
 extern bool shuffle;
@@ -89,5 +114,8 @@ bool str_is_empty(const char *str);
 void rek_mkdir(const char *path);
 
 FILE *fopen_mkdir(const char *path, char *mode);
+
+int
+decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress);
 
 #endif
