@@ -14,6 +14,8 @@
 uint32_t preload_amount;
 char *track_save_path;
 size_t track_save_path_len;
+char *track_info_path = "/home/quartzy/dev/smp/debug/cache/smp/info/";
+size_t track_info_path_len = 43;
 char *playlist_save_path;
 size_t playlist_save_path_len;
 double initial_volume;
@@ -160,7 +162,7 @@ load_config() {
     cJSON *v = NULL;
     if (!cJSON_HasObjectItem(config_root, "piped_api_instances") ||
         cJSON_GetArraySize((v = cJSON_GetObjectItem(config_root, "piped_api_instances"))) == 0) {
-        Response res;
+        /*Response res;
         read_url("https://piped-instances.kavin.rocks/", &res, NULL);
 
         if (!res.size) {
@@ -181,7 +183,7 @@ load_config() {
         }
         piped_api_instance_count = i;
         free(res.data);
-        cJSON_Delete(root);
+        cJSON_Delete(root);*/
     } else {
         piped_api_instance_count = cJSON_GetArraySize(v);
         piped_api_instances = calloc(piped_api_instance_count, sizeof(*piped_api_instances));
@@ -193,7 +195,7 @@ load_config() {
     download_instances_part:
     if (!cJSON_HasObjectItem(config_root, "download_instances") ||
         cJSON_GetArraySize((v = cJSON_GetObjectItem(config_root, "download_instances"))) == 0) {
-        Response res;
+        /*Response res;
         read_url("https://api.invidious.io/instances.json", &res, NULL);
 
         if (!res.size) {
@@ -218,7 +220,7 @@ load_config() {
         }
         download_instance_count = i;
         free(res.data);
-        cJSON_Delete(root);
+        cJSON_Delete(root);*/
     } else {
         download_instance_count = cJSON_GetArraySize(v);
         download_instances = calloc(download_instance_count, sizeof(*download_instances));

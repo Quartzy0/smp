@@ -172,10 +172,8 @@ FILE
 }
 
 int
-decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress) {
-//    static FILE *fp = NULL;
-//    if (!fp) fp = fopen("tmp", "w");
-    size_t buf_len = evbuffer_get_length(in);
+decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
+              struct audio_info *info, audio_info_cb cb) {
     switch (ctx->state) {
         case START: {
             ogg_sync_init(&ctx->oy);
@@ -183,17 +181,7 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
             ctx->p = 0;
         }
         case HEADERS: {
-            if (ctx->p >= 3) {
-                if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
-                    fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
-                    exit(1);
-                }
-                vorbis_block_init(&ctx->vd, &ctx->vb);
-                ctx->state = DECODE;
-                ctx->p = 0;
-                goto decode;
-            }
-
+            size_t buf_len = evbuffer_get_length(in);
             char *buf = ogg_sync_buffer(&ctx->oy, buf_len);
             size_t bytes = evbuffer_remove(in, buf, buf_len);
             *progress += bytes;
@@ -228,19 +216,36 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
                     }
                     ctx->p++;
                 }
+
+                if (ctx->p >= 3) {
+                    info->sample_rate = ctx->vi.rate;
+                    info->bitrate = ctx->vi.bitrate_nominal;
+                    info->channels = ctx->vi.channels;
+                    if (cb) cb(info);
+                    if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
+                        fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
+                        exit(1);
+                    }
+                    vorbis_block_init(&ctx->vd, &ctx->vb);
+                    ctx->state = DECODE;
+                    ctx->p = 0;
+                    goto decode_no_read;
+                }
             }
 
             break;
         }
         case DECODE:
-        decode:
         {
             ctx->p = 0;
+            size_t buf_len = evbuffer_get_length(in);
+            if (!buf_len) return 1;
             char *buf = ogg_sync_buffer(&ctx->oy, buf_len);
             size_t bytes = evbuffer_remove(in, buf, buf_len);
             *progress += bytes;
             ogg_sync_wrote(&ctx->oy, bytes);
 
+            decode_no_read:
             while (1) {
                 int result = ogg_sync_pageout(&ctx->oy, &ctx->og);
                 if (result == 0)break; /* need more data */
@@ -295,7 +300,7 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
 
 
                                 evbuffer_add(buf_out, pcmi, samples * ctx->vi.channels * sizeof(*pcmi));
-//                                fwrite(pcmi, samples * ctx->vi.channels * sizeof(*pcmi), 1, fp);
+//                                fwrite(pcmi, samples * decode_ctx->vi.channels * sizeof(*pcmi), 1, fp);
 
                                 ctx->p += samples * ctx->vi.channels * sizeof(*pcmi);
 

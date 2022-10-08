@@ -12,6 +12,7 @@ extern PlaylistInfo cplaylist;
 extern size_t track_index;
 extern Track *tracks;
 extern size_t track_count;
+extern size_t track_size;
 
 void * init_dbus(void *arg);
 

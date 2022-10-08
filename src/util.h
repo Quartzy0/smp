@@ -59,6 +59,16 @@ struct smp_context{
     int action_fd[2];
     struct evbuffer *audio_buf;
     struct spotify_state *spotify;
+    struct audio_info{
+        double volume;
+        size_t sample_rate;
+        size_t bitrate;
+        size_t offset;
+        size_t total_frames;
+        int channels;
+        struct audio_info *previous;
+    } audio_info;
+    struct audio_info previous;
 };
 
 struct decode_context{
@@ -83,6 +93,8 @@ struct decode_context{
     int p;
     int zero_count;
 };
+
+typedef void(*audio_info_cb)(struct audio_info *info);
 
 extern LoopMode loop_mode;
 extern bool shuffle;
@@ -116,6 +128,7 @@ void rek_mkdir(const char *path);
 FILE *fopen_mkdir(const char *path, char *mode);
 
 int
-decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress);
+decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
+              struct audio_info *info, audio_info_cb cb);
 
 #endif

@@ -11,6 +11,8 @@
 extern uint32_t preload_amount;
 extern char *track_save_path;
 extern size_t track_save_path_len;
+extern char *track_info_path;
+extern size_t track_info_path_len;
 extern char *playlist_save_path;
 extern size_t playlist_save_path_len;
 extern double initial_volume;

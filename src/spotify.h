@@ -62,6 +62,9 @@ enum error_type {
     ET_HTTP,
     ET_FULL
 };
+struct connection;
+
+typedef void (*spotify_conn_cb)(struct bufferevent *bev, struct connection *conn, void *arg);
 
 struct spotify_state{
     struct connection{
@@ -71,15 +74,21 @@ struct spotify_state{
         enum spotify_packet_type last_packet;
         size_t expecting;
         size_t progress;
-        struct evbuffer *transfer_buf;
-        struct decode_context ctx;
+        struct spotify_state *spotify;
+        spotify_conn_cb cb;
+        void *cb_arg;
+        FILE *cache_fp;
+        char *cache_path;
 
         char *error_buffer;
         enum error_type error_type;
     } connections[CONNECTION_POOL_MAX];
     size_t connections_len;
     struct event_base *base;
-    char *instances[SPOTIFY_MAX_INSTANCES];
+    char **instances;
+    size_t instances_len;
+    struct decode_context decode_ctx;
+    struct smp_context *smp_ctx;
 };
 
 void get_token();
@@ -88,7 +97,9 @@ void ensure_token();
 
 void * init_spotify(void *state);
 
-int write_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf);
+int play_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf);
+
+int add_track_info(struct spotify_state *spotify, char id[22], Track **tracks, size_t *track_size, size_t *track_len);
 
 int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
            PlaylistInfo **albums, size_t *album_count);

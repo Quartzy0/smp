@@ -17,10 +17,9 @@ dbus_bool_t running = false;
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
 DBusConnection *conn;
-
 sem_t state_change_lock;
-
 DBusError err;
+const char *null_str = "null";
 
 #define CHECK_TYPE(args, type) if (dbus_message_iter_get_arg_type(args)!=(type)){ fprintf(stderr, "[dbus] Invalid argument type\n");return; }
 
@@ -66,7 +65,10 @@ void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, 
     dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &attribute);
     // Create the value for this entry
     dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, type_string, &dict_val);
-    dbus_message_iter_append_basic(&dict_val, type, attr_value);
+    if (!attr_value)
+        dbus_message_iter_append_basic(&dict_val, type, &null_str);
+    else
+        dbus_message_iter_append_basic(&dict_val, type, attr_value);
     // Clean up and return
     dbus_message_iter_close_container(&dict_entry, &dict_val);
     dbus_message_iter_close_container(dict, &dict_entry);
@@ -74,7 +76,7 @@ void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, 
 
 // Adds one string/{type} dictionary entry to dict
 void add_dict_entry(DBusMessageIter *dict, char *attribute, void *attr_value, int type) {
-    add_dict_entry_p(dict, attribute, &attr_value, type);
+    add_dict_entry_p(dict, attribute, attr_value ? &attr_value : NULL, type);
 }
 
 // Adds one string/a{type} dictionary entry to dict
@@ -89,8 +91,16 @@ void add_dict_entry_array(DBusMessageIter *dict, char *attribute, void **attr_va
     // Create the value for this entry
     dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, type_array, &dict_val);
     dbus_message_iter_open_container(&dict_val, DBUS_TYPE_ARRAY, type_str, &arr_val);
-    for (int i = 0; i < count; ++i) {
-        dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &attr_value[i]);
+    if (!attr_value){
+        dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &null_str);
+    }else{
+        for (int i = 0; i < count; ++i) {
+            if (!attr_value[i]){
+                dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &null_str);
+            } else {
+                dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &attr_value[i]);
+            }
+        }
     }
     // Clean up and return
     dbus_message_iter_close_container(&dict_val, &arr_val);
@@ -99,7 +109,7 @@ void add_dict_entry_array(DBusMessageIter *dict, char *attribute, void **attr_va
 }
 
 void get_track_metadata(DBusMessageIter *iter, Track *track) {
-    if (!started)return;
+    if (!started || !track)return;
     DBusMessageIter dict;
     dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
 
@@ -201,7 +211,7 @@ void get_mediaplayer(DBusMessage *msg, char *property) {
     dbus_message_unref(reply);
 }
 
-void get_mediaplayer_player(DBusMessage *msg, char *property) {
+void get_mediaplayer_player(DBusMessage *msg, char *property, struct audio_info *info) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -274,11 +284,11 @@ void get_mediaplayer_player(DBusMessage *msg, char *property) {
         dbus_message_iter_append_basic(&var, DBUS_TYPE_DOUBLE, &volume);
     } else if (!strcmp(property, "Position") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "x", &var);
-        int64_t position = ((int64_t) offset / audio_samplerate) * 1000000; //Convert to micoseconds
+        int64_t position = ((int64_t) info->offset / info->sample_rate) * 1000000; //Convert to micoseconds
         dbus_message_iter_append_basic(&var, DBUS_TYPE_INT64, &position);
     } else if (!strcmp(property, "Metadata") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "a{sv}", &var);
-        get_track_metadata(&var, &tracks[track_index]);
+        if (track_index < track_count) get_track_metadata(&var, &tracks[track_index]);
     } else {
         dbus_message_unref(reply);
         //Send empty reply
@@ -444,7 +454,7 @@ void getall_mediaplayer(DBusMessage *msg) {
 }
 
 // Tell about our capabilities, few as they are
-void getall_mediaplayer_player(DBusMessage *msg) {
+void getall_mediaplayer_player(DBusMessage *msg, struct audio_info *info) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -487,7 +497,7 @@ void getall_mediaplayer_player(DBusMessage *msg) {
 
     //Metadata
     if (started) {
-        int64_t position = ((int64_t) offset / audio_samplerate) * 1000000; //Convert to micoseconds
+        int64_t position = ((int64_t) info->offset / info->sample_rate) * 1000000; //Convert to micoseconds
         add_dict_entry_p(&dict, "Position", &position, DBUS_TYPE_INT64);
         DBusMessageIter dict_entry, dict_val;
         // Create our entry in the dictionary
@@ -497,7 +507,7 @@ void getall_mediaplayer_player(DBusMessage *msg) {
         dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &attribute);
         // Create the value for this entry
         dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "a{sv}", &dict_val);
-        get_track_metadata(&dict_val, &tracks[track_index]);
+        if (track_index < track_count) get_track_metadata(&dict_val, &tracks[track_index]);
         // Clean up and return
         dbus_message_iter_close_container(&dict_entry, &dict_val);
         dbus_message_iter_close_container(&dict, &dict_entry);
@@ -870,7 +880,7 @@ handle_message(struct smp_context *ctx) {
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     getall_mediaplayer(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    getall_mediaplayer_player(msg);
+                    getall_mediaplayer_player(msg, &ctx->audio_info);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
                     getall_mediaplayer_playlists(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {
@@ -902,7 +912,7 @@ handle_message(struct smp_context *ctx) {
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     get_mediaplayer(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    get_mediaplayer_player(msg, property);
+                    get_mediaplayer_player(msg, property, &ctx->audio_info);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
                     get_mediaplayer_playlists(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {

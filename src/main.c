@@ -18,6 +18,7 @@ PlaylistInfo cplaylist;
 size_t track_index = -1;
 Track *tracks = NULL;
 size_t track_count;
+size_t track_size;
 Track *next_tracks = NULL;
 size_t next_track_count = 0;
 pthread_t prepare_thread;
@@ -82,7 +83,7 @@ redo_audio(struct smp_context *ctx) {
         Action a = {.type = ACTION_POSITION_RELATIVE};
         a.position = 1;
         write(ctx->action_fd[1], &a, sizeof(a));
-        start();
+        start(&ctx->audio_info);
         return;
     }
     printf("[ctrl] Playing '%s' by %s\n", tracks[track_index].spotify_name,
@@ -95,7 +96,7 @@ redo_audio(struct smp_context *ctx) {
         if (set_file(file)) return;
         free(file);
     }
-    start();
+    start(&ctx->audio_info);
     play();
 }
 
@@ -245,18 +246,15 @@ handle_action(int fd, short what, void *arg) {
         case ACTION_TRACK: {
             printf("[ctrl] Starting track with id %s\n", a.id);
             if (started) {
-                pause();
-                stop();
+//                pause();
+//                stop();
                 free_tracks(tracks, track_count);
                 tracks = NULL;
             }
             track_index = 0;
-            track_count = 1;
-            write_track(ctx->spotify, a.id, ctx->audio_buf);
-//            if (!track_by_id(a.id, (Track **) &tracks))
-//                redo_audio(ctx);
-            start();
-            play();
+            track_count = 0;
+            add_track_info(ctx->spotify, a.id, &tracks, &track_size, &track_count);
+            play_track(ctx->spotify, a.id, ctx->audio_buf);
             break;
         }
         case ACTION_SEEK: {
@@ -265,8 +263,8 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
         case ACTION_SET_POSITION: {
-            int64_t seek_new = -(((int64_t) (offset / audio_samplerate) * 1000000) - a.position);
-            if ((int64_t) seek_new > (int64_t) (frames / audio_samplerate) * 1000000) break;
+            int64_t seek_new = -(((int64_t) (ctx->audio_info.offset / ctx->audio_info.sample_rate) * 1000000) - a.position);
+            if ((int64_t) seek_new > (int64_t) (frames / ctx->audio_info.sample_rate) * 1000000) break; // TODO: 'frames' no longer exists
             seek = seek_new;
             printf("[ctrl] Set position to: %ld\n", seek);
             break;
@@ -283,17 +281,21 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-//    if (load_config()) {
-//        return EXIT_FAILURE;
-//    }
+    if (load_config()) {
+        return EXIT_FAILURE;
+    }
 
     struct spotify_state state;
     state.connections_len = 0;
+    state.instances = calloc(1, sizeof(*state.instances));
     state.instances[0] = "127.0.0.1";
+    state.instances_len = 1;
     struct smp_context ctx;
     ctx.base = event_base_new();
     ctx.spotify = &state;
     state.base = ctx.base;
+    state.smp_ctx = &ctx;
+    ctx.audio_info.previous = &ctx.previous;
 
 //    volume = initial_volume;
     volume = 0.5;

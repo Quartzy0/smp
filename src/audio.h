@@ -12,10 +12,7 @@ extern int status;
 extern bool started;
 extern double volume;
 extern int64_t seek;
-extern size_t offset;
 extern size_t frames;
-extern int audio_samplerate;
-extern int audio_fd[2];
 
 #define FRAMES_PER_BUFFER   (512)
 
@@ -25,7 +22,7 @@ int set_file(const char *filename);
 
 int set_pcm_stream(FILE *fp);
 
-int start();
+int start(struct audio_info *info);
 
 int stop();
 

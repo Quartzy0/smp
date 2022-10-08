@@ -15,6 +15,7 @@
 #include <event2/bufferevent.h>
 #include "config.h"
 #include "downloader.h"
+#include "audio.h"
 
 const char recommendations_base_url[] = "https://api.spotify.com/v1/recommendations?seed_tracks=";
 const size_t recommendations_base_url_len = sizeof(recommendations_base_url) - 1;
@@ -60,7 +61,7 @@ get_token() {
     strcpy(token_header, "Authorization: Bearer ");
     strcpy(&token_header[22], token);
 
-    if (auth_header){
+    if (auth_header) {
         curl_slist_free_all(auth_header);
         auth_header = NULL;
     }
@@ -234,71 +235,6 @@ search(const char *query_in, Track **tracks, size_t *tracks_count, PlaylistInfo 
     }
 
     end:
-    cJSON_Delete(root);
-    free(response.data);
-    return 0;
-}
-
-int
-track_by_id(const char *id, Track **track) {
-    ensure_token();
-    int attempts = 3;
-    retry_req:;
-
-    char *url = malloc((34 + SPOTIFY_ID_LEN) * sizeof(*id) + 1);
-    snprintf(url, (34 + SPOTIFY_ID_LEN) * sizeof(*id) + 1, "https://api.spotify.com/v1/tracks/%s", id);
-
-    Response response;
-    read_url(url, &response, auth_header);
-    free(url);
-
-    if (!response.size) {
-        fprintf(stderr, "[spotify] Got empty response when trying to get playlist info\n");
-        free(response.data);
-        return 1;
-    }
-
-    cJSON *root = cJSON_ParseWithLength(response.data, response.size);
-
-    if (cJSON_HasObjectItem(root, "error")) {
-        cJSON *err = cJSON_GetObjectItem(root, "error");
-        int status = cJSON_GetObjectItem(err, "status")->valueint;
-        free(response.data);
-        if (status == 401 && attempts-- != 0) {
-            get_token();
-            goto retry_req;
-        }
-        fprintf(stderr, "[spotify] Error occurred when trying to get track info: %s\n", cJSON_GetStringValue(
-                cJSON_GetObjectItem(err, "message")));
-        cJSON_Delete(root);
-        return 1;
-    }
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "is_local"))) {
-        fprintf(stderr, "[spotify] Local tracks cannot be downloaded. (ID: %s)\n", id);
-        cJSON_Delete(root);
-        free(response.data);
-        return 1;
-    }
-
-    (*track) = malloc(sizeof(**track));
-    memcpy((*track)->spotify_id, id, SPOTIFY_ID_LEN_NULL);
-    (*track)->spotify_name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(root, "name")));
-    sanitize(&(*track)->spotify_name);
-    (*track)->spotify_name_escaped = urlencode((*track)->spotify_name);
-    memcpy((*track)->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(root, "uri")), SPOTIFY_URI_LEN_NULL);
-    (*track)->spotify_album_art = strdup(cJSON_GetStringValue(
-            cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "album"), "images"),
-                                                   0), "url")));
-    (*track)->download_state = DS_NOT_DOWNLOADED;
-    (*track)->duration_ms = cJSON_GetObjectItem(root, "duration_ms")->valueint;
-
-    cJSON *artist = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "artists"), 0);
-    (*track)->artist = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(artist, "name")));
-
-    memcpy((*track)->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
-    sanitize(&(*track)->artist);
-    (*track)->artist_escaped = urlencode((*track)->artist);
-
     cJSON_Delete(root);
     free(response.data);
     return 0;
@@ -546,10 +482,26 @@ cleanup() {
 
 void
 track_filepath(Track *track, char **out) {
-    (*out) = malloc((track_save_path_len + SPOTIFY_URI_LEN + 4 + 1) * sizeof(char));
-    snprintf((*out), track_save_path_len + SPOTIFY_URI_LEN + 4 + 1, "%s%s.ogg", track_save_path,
+    (*out) = malloc((track_save_path_len + SPOTIFY_ID_LEN + 4 + 1) * sizeof(char));
+    snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%s.ogg", track_save_path,
              track->spotify_id);
-    out[track_save_path_len + strlen(track->spotify_id) + 4] = 0;
+    out[track_save_path_len + SPOTIFY_ID_LEN + 4] = 0;
+}
+
+void
+track_filepath_id(char id[22], char **out) {
+    (*out) = malloc((track_save_path_len + SPOTIFY_ID_LEN + 4 + 1) * sizeof(char));
+    snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%s.ogg", track_save_path,
+             id);
+    out[track_save_path_len + SPOTIFY_ID_LEN + 4] = 0;
+}
+
+void
+track_info_filepath_id(char id[22], char **out) {
+    (*out) = malloc((track_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
+    snprintf((*out), track_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", track_info_path,
+             id);
+    out[track_info_path_len + SPOTIFY_ID_LEN + 5] = 0;
 }
 
 void
@@ -970,18 +922,20 @@ static const char *err_c[] = {
 };
 
 struct connection *
-spotify_connect(struct spotify_state *spotify){
+spotify_connect(struct spotify_state *spotify) {
     printf("[spotify] Creating spotify connection\n");
     size_t i;
     for (i = 0; i < spotify->connections_len; ++i) {
         if (spotify->connections[i].bev && !spotify->connections[i].busy) return &spotify->connections[i];
     }
     if (spotify->connections_len >= CONNECTION_POOL_MAX) return NULL;
-    printf("[spotify] Creating new connection to %s\n", spotify->instances[i]);
+    size_t inst = (size_t) (((float) rand() / (float) RAND_MAX) * (float) (spotify->instances_len - 1));
+    printf("[spotify] Creating new connection to %s\n", spotify->instances[inst]);
     spotify->connections_len++;
     spotify->connections[i].bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_enable(spotify->connections[i].bev, EV_READ|EV_WRITE);
-    if(bufferevent_socket_connect_hostname(spotify->connections[i].bev, NULL, AF_UNSPEC, spotify->instances[i], SPOTIFY_PORT) != 0){
+    bufferevent_enable(spotify->connections[i].bev, EV_READ | EV_WRITE);
+    if (bufferevent_socket_connect_hostname(spotify->connections[i].bev, NULL, AF_UNSPEC, spotify->instances[inst],
+                                            SPOTIFY_PORT) != 0) {
         bufferevent_free(spotify->connections[i].bev);
         return NULL;
     }
@@ -989,58 +943,241 @@ spotify_connect(struct spotify_state *spotify){
 }
 
 void
-track_data_read_cb(struct bufferevent *bev, void *arg){
-    struct connection *conn = (struct connection*) arg;
+generic_read_cb(struct bufferevent *bev, void *arg) {
+    struct connection *conn = (struct connection *) arg;
     struct evbuffer *input = bufferevent_get_input(bev);
-    if (!conn->expecting){
+    if (!conn->expecting) {
         uint8_t *data = evbuffer_pullup(input, 9);
         if (!data) return; // Not enough data yet
-        conn->expecting = *((size_t*) &data[1]);
+        conn->expecting = *((size_t *) &data[1]);
         if (data[0] != ET_NO_ERROR) { // Error occurred
             conn->error_buffer = calloc(conn->expecting + 1, sizeof(*conn->error_buffer));
-        }else {
+            free(conn->cache_path);
+            conn->cache_path = NULL; // Not caching errors
+        } else {
             conn->error_buffer = NULL;
+            if (conn->cache_path) conn->cache_fp = fopen(conn->cache_path, "w");
+            else conn->cache_fp = NULL;
         }
         conn->error_type = data[0];
         printf("[spotify] Receiving data: %s\n", err_c[conn->error_type]);
         evbuffer_drain(input, 9);
     }
-    if (conn->error_buffer){
-        conn->progress += evbuffer_remove(input, &conn->error_buffer[conn->progress], conn->expecting-conn->progress);
-        if (conn->expecting == conn->progress){
-            fprintf(stderr, "[spotify] Received error from smp backend %s: %s\n", err_c[conn->error_type], conn->error_buffer);
+    if (conn->error_buffer) {
+        conn->progress += evbuffer_remove(input, &conn->error_buffer[conn->progress], conn->expecting - conn->progress);
+        if (conn->expecting == conn->progress) {
+            fprintf(stderr, "[spotify] Received error from smp backend %s: %s\n", err_c[conn->error_type],
+                    conn->error_buffer);
             free(conn->error_buffer);
             conn->error_buffer = NULL;
-        }
-    }else{
-        if (!decode_vorbis(input, conn->transfer_buf, &conn->ctx, &conn->progress)){ // Stream is over
             conn->busy = false;
-            memset(&conn->ctx, 0, sizeof(conn->ctx));
-            printf("[spotify] End of stream\n");
         }
-//        conn->progress += evbuffer_write(input, conn->transfer_fd);
-        if (conn->expecting == conn->progress){
-            printf("[spotify] All data received\n");
+    } else {
+        if (conn->cache_fp) {
+            uint8_t *data = evbuffer_pullup(input, -1);
+            fwrite(data, 1, evbuffer_get_length(input), conn->cache_fp);
+        }
+        conn->cb(bev, conn, conn->cb_arg);
+        if (conn->expecting == conn->progress) {
+            conn->busy = false;
+            if (conn->cache_fp) fclose(conn->cache_fp);
+            free(conn->cache_path);
+            conn->cache_path = NULL;
+            conn->cache_fp = NULL;
         }
     }
 }
 
+void
+track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
+    struct evbuffer *input = bufferevent_get_input(bev);
+    if (!decode_vorbis(input, arg, &conn->spotify->decode_ctx, &conn->progress,
+                       &conn->spotify->smp_ctx->audio_info, (audio_info_cb) start)) { // Stream is over
+        conn->busy = false;
+        memset(&conn->spotify->decode_ctx, 0, sizeof(conn->spotify->decode_ctx));
+        printf("[spotify] End of stream\n");
+    }
+    if (conn->expecting == conn->progress) {
+        printf("[spotify] All data received\n");
+    }
+}
+
 int
-write_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf){
+read_remote_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf) {
     struct connection *conn = spotify_connect(spotify);
     if (!conn) return -1;
 
     char data[23];
     data[0] = MUSIC_DATA;
-    memcpy(&data[1], id, sizeof(data)-1);
+    memcpy(&data[1], id, sizeof(data) - 1);
     conn->last_packet = MUSIC_DATA;
     conn->progress = 0;
     conn->expecting = 0;
-    conn->transfer_buf = buf;
+    conn->cb_arg = buf;
     conn->busy = true;
-    memset(&conn->ctx, 0, sizeof(conn->ctx));
+    conn->spotify = spotify;
+    conn->cb = track_data_read_cb;
+    track_filepath_id(id, &conn->cache_path);
 
-    if(bufferevent_write(conn->bev, data, sizeof(data)) != 0) return -1;
-    bufferevent_setcb(conn->bev, track_data_read_cb, NULL, NULL, conn);
+    if (bufferevent_write(conn->bev, data, sizeof(data)) != 0) return -1;
+    bufferevent_setcb(conn->bev, generic_read_cb, NULL, NULL, conn);
+    return 0;
+}
+
+int
+read_local_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf) {
+    char *path = NULL;
+    track_filepath_id(id, &path);
+    FILE *fp = fopen(path, "r");
+    free(path);
+    if (!fp) return 1;
+    struct evbuffer *file_buf = evbuffer_new();
+    evbuffer_add_file(file_buf, fileno(fp), 0, -1);
+    size_t p = 0;
+    while (decode_vorbis(file_buf, buf, &spotify->decode_ctx, &p, &spotify->smp_ctx->audio_info,
+                         (audio_info_cb) start)) {}
+    evbuffer_free(file_buf);
+    return 0;
+}
+
+int
+play_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf) {
+    if (!spotify || !id || !buf) return 1;
+    memset(&spotify->decode_ctx, 0, sizeof(spotify->decode_ctx));
+    if (read_local_track(spotify, id, buf))
+        return read_remote_track(spotify, id, buf);
+    return 0;
+}
+
+int
+parse_track_json(char id[22], Track *track, char *data, size_t len) {
+    cJSON *root = cJSON_ParseWithLength(data, len);
+
+    if (!root) {
+        fprintf(stderr, "[spotify] Error when paring track JSON: %s\n", cJSON_GetErrorPtr());
+        return 1;
+    }
+
+    if (cJSON_HasObjectItem(root, "error")) {
+        cJSON *err = cJSON_GetObjectItem(root, "error");
+        int status = cJSON_GetObjectItem(err, "status")->valueint;
+        fprintf(stderr, "[spotify] Error occurred when trying to get track info (%d): %s\n", status,
+                cJSON_GetStringValue(
+                        cJSON_GetObjectItem(err, "message")));
+        cJSON_Delete(root);
+        return 1;
+    }
+    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "is_local"))) {
+        fprintf(stderr, "[spotify] Local tracks cannot be downloaded. (ID: %s)\n", id);
+        cJSON_Delete(root);
+        return 1;
+    }
+
+    memcpy(track->spotify_id, id, SPOTIFY_ID_LEN_NULL);
+    track->spotify_name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(root, "name")));
+    sanitize(&track->spotify_name);
+    track->spotify_name_escaped = urlencode(track->spotify_name);
+    memcpy(track->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(root, "uri")), SPOTIFY_URI_LEN_NULL);
+    track->spotify_album_art = strdup(cJSON_GetStringValue(
+            cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "album"), "images"),
+                                                   0), "url")));
+    track->download_state = DS_NOT_DOWNLOADED;
+    track->duration_ms = cJSON_GetObjectItem(root, "duration_ms")->valueint;
+
+    cJSON *artist = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "artists"), 0);
+    track->artist = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(artist, "name")));
+
+    memcpy(track->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
+    sanitize(&track->artist);
+    track->artist_escaped = urlencode(track->artist);
+
+    cJSON_Delete(root);
+    return 0;
+}
+
+void
+track_info_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
+    struct evbuffer *input = bufferevent_get_input(bev);
+    conn->progress = evbuffer_get_length(input);
+    if (conn->progress == conn->expecting) { // All data is in the buffer, now parse all at once
+        Track *track = (Track *) arg;
+        char buf[conn->progress];
+        evbuffer_remove(input, buf, conn->progress);
+
+        char *path = NULL;
+        track_info_filepath_id(track->spotify_id, &path);
+        FILE *fp = fopen(path, "w");
+        if (fp) {
+            fwrite(buf, 1, conn->progress, fp);
+            fclose(fp);
+        } else {
+            fprintf(stderr, "[spotify] Error when trying to open/create cache file '%s': %s\n", path, strerror(errno));
+        }
+
+        parse_track_json(track->spotify_id, track, buf, conn->progress);
+        printf("[spotify] Parsed track info\n");
+        conn->busy = false;
+    }
+}
+
+int
+add_remote_track_info(struct spotify_state *spotify, char id[22], Track *track) {
+    struct connection *conn = spotify_connect(spotify);
+    if (!conn) return -1;
+
+    char data[23];
+    data[0] = MUSIC_INFO;
+    memcpy(&data[1], id, sizeof(data) - 1);
+    conn->last_packet = MUSIC_INFO;
+    conn->progress = 0;
+    conn->expecting = 0;
+    conn->busy = true;
+    conn->spotify = spotify;
+    conn->cb = track_info_read_cb;
+    conn->cb_arg = track;
+    conn->cache_path = NULL; // Since data is not cleared from the buffer after every read event, the cache has to be written only when all the data has been received
+
+    if (bufferevent_write(conn->bev, data, sizeof(data)) != 0) return -1;
+    bufferevent_setcb(conn->bev, generic_read_cb, NULL, NULL, conn);
+    return 0;
+}
+
+int
+add_local_track_info(char id[22], Track *track) {
+    char *path = NULL;
+    track_info_filepath_id(id, &path);
+    FILE *fp = fopen(path, "r");
+    free(path);
+    if (!fp) return 1;
+    fseek(fp, 0L, SEEK_END);
+    size_t len = ftell(fp);
+    rewind(fp);
+    char buf[len + 1];
+    size_t read = fread(buf, 1, len, fp);
+    fclose(fp);
+    if (read != len) return 1;
+    buf[len] = 0;
+    return parse_track_json(id, track, buf, len + 1);
+}
+
+int
+add_track_info(struct spotify_state *spotify, char id[22], Track **tracks, size_t *track_size, size_t *track_len) {
+    if (*tracks) {
+        if (*track_size < *track_len + 1) {
+            Track *tmp = realloc(&tracks, sizeof(*tmp) * (*track_size + 10));
+            if (!tmp) perror("[spotify] Error when calling realloc to expand track list");
+            *tracks = tmp;
+            *track_size += 10;
+        }
+    } else {
+        *tracks = calloc(sizeof(**tracks), 30);
+        *track_size = 30;
+        *track_len = 0;
+    }
+    size_t i = (*track_len)++;
+    memset(&(*tracks)[i], 0, sizeof((*tracks)[i]));
+    memcpy((*tracks)[i].spotify_id, id, 22);
+    if (add_local_track_info(id, &(*tracks)[i]))
+        return add_remote_track_info(spotify, id, &(*tracks)[i]);
     return 0;
 }
