@@ -14,7 +14,6 @@
 #include "cli.h"
 #include <event2/event.h>
 
-PlaylistInfo cplaylist;
 size_t track_index = -1;
 Track *tracks = NULL;
 size_t track_count;
@@ -30,6 +29,11 @@ struct RecommendationParams {
     size_t *next_track_count;
 };
 
+void
+tracks_loaded_cb(struct spotify_state *spotify, Track *tracks){
+    play_track(spotify, tracks[0].spotify_id, spotify->smp_ctx->audio_buf);
+}
+
 void *
 prepare_recommendations(void *userp) {
     struct RecommendationParams *params = (struct RecommendationParams *) userp;
@@ -43,119 +47,35 @@ prepare_recommendations(void *userp) {
 }
 
 void
-redo_audio(struct smp_context *ctx) {
-    printf("[ctrl] Attempting to download new tracks\n");
-    FILE *pcm = NULL;
-    for (int i = 0; i < preload_amount; ++i) {
-        Track *track = NULL;
-        if (track_index + i >= track_count) {
-            if (loop_mode == LOOP_MODE_NONE) {
-                if (next_track_count == 0) {
-                    next_track_count = -1;
-                    struct RecommendationParams *params = malloc(sizeof(*params));
-                    params->next_tracks = &next_tracks;
-                    params->next_track_count = &next_track_count;
-                    params->tracks = tracks;
-                    params->track_count = track_count;
-                    pthread_create(&prepare_thread, NULL, prepare_recommendations, params);
-                } else if (next_track_count != -1) {
-                    track = &next_tracks[(track_index + i) - track_count];
-                    goto loop;
-                }
-            }
-            break;
-        } else {
-            track = &tracks[track_index + i];
-        }
-        loop:
-        download_track(track, !i, &pcm);
-    }
-    while (tracks[track_index].download_state == DS_DOWNLOADING) {
-        printf("[ctrl] Sleep sleep... (downloading)\n");
-        if (syscall(SYS_futex, &tracks[track_index].download_state, FUTEX_WAIT, DS_DOWNLOADING, NULL,
-                    0, 0) == -1) {
-            fprintf(stderr, "Error when waiting: %s\n", strerror(errno));
-            break;
-        }
-    }
-    if (tracks[track_index].download_state ==
-        DS_DOWNLOAD_FAILED) { //Go to next track if this track couldn't be downloaded
-        Action a = {.type = ACTION_POSITION_RELATIVE};
-        a.position = 1;
-        write(ctx->action_fd[1], &a, sizeof(a));
-        start(&ctx->audio_info);
-        return;
-    }
-    printf("[ctrl] Playing '%s' by %s\n", tracks[track_index].spotify_name,
-           tracks[track_index].artist);
-    if (pcm){
-        set_pcm_stream(pcm);
-    }else{
-        char *file = NULL;
-        track_filepath(&tracks[track_index], &file);
-        if (set_file(file)) return;
-        free(file);
-    }
-    start(&ctx->audio_info);
-    play();
-}
-
-void
 handle_action(int fd, short what, void *arg) {
     struct smp_context *ctx = (struct smp_context*) arg;
     Action a;
     read(fd, &a, sizeof(a));
     switch (a.type) {
         case ACTION_QUIT: {
-            if (started) {
-                pause();
-                stop();
+            stop();
+            for (int i = 0; i < ctx->spotify->connections_len; ++i) {
+                struct connection *conn = &ctx->spotify->connections[i];
+                if (conn->bev) bufferevent_free(conn->bev);
+                if (conn->cache_fp) fclose(conn->cache_fp);
+                if (conn->cache_path) remove(conn->cache_path); // Remove unfinished file
+                if (conn->params.path) free(conn->params.path);
             }
             event_base_loopbreak(ctx->base);
+            break;
         }
         case ACTION_ALBUM: {
             printf("[ctrl] Starting album with id %s\n", a.id);
-            if (started) {
-                pause();
-                stop();
-                free_tracks(tracks, track_count);
-                tracks = NULL;
-                track_count = 0;
-            }
+            clear_tracks(tracks, &track_count, &track_size);
             track_index = 0;
-            if (!get_album(a.id, &cplaylist, (Track **) &tracks)) {
-                track_count = cplaylist.track_count;
-                struct timespec tp;
-                clock_gettime(CLOCK_REALTIME, &tp);
-                cplaylist.last_played = tp.tv_sec;
-                redo_audio(ctx);
-                char *file = NULL;
-                playlist_filepath(cplaylist.spotify_id, &file, cplaylist.album);
-                save_playlist_last_played_to_file(file, (PlaylistInfo *) &cplaylist);
-                free(file);
-            }
+            add_playlist(ctx->spotify, a.id, &tracks, &track_size, &track_count, true, tracks_loaded_cb);
             break;
         }
         case ACTION_PLAYLIST: {
             printf("[ctrl] Starting playlist with id %s\n", a.id);
-            if (started) {
-                pause();
-                stop();
-                free_tracks(tracks, track_count);
-                tracks = NULL;
-            }
+            clear_tracks(tracks, &track_count, &track_size);
             track_index = 0;
-            if (!get_playlist(a.id, &cplaylist, &tracks)) {
-                track_count = cplaylist.track_count;
-                struct timespec tp;
-                clock_gettime(CLOCK_REALTIME, &tp);
-                cplaylist.last_played = tp.tv_sec;
-                redo_audio(ctx);
-                char *file = NULL;
-                playlist_filepath(cplaylist.spotify_id, &file, cplaylist.album);
-                save_playlist_last_played_to_file(file, (PlaylistInfo *) &cplaylist);
-                free(file);
-            }
+            add_playlist(ctx->spotify, a.id, &tracks, &track_size, &track_count, false, tracks_loaded_cb);
             break;
         }
         case ACTION_PAUSE: {
@@ -176,8 +96,7 @@ handle_action(int fd, short what, void *arg) {
         case ACTION_STOP: {
             pause();
             stop();
-            free_tracks(tracks, track_count);
-            tracks = NULL;
+            clear_tracks(tracks, &track_count, &track_size);
             free_tracks(next_tracks, next_track_count);
             next_tracks = NULL;
             next_track_count = 0;
@@ -200,7 +119,7 @@ handle_action(int fd, short what, void *arg) {
                 if (track_index + a.position >= track_count || track_index + a.position < 0) {
                     if (loop_mode == LOOP_MODE_PLAYLIST) {
                         track_index = 0;
-                        redo_audio(ctx);
+                        play_track(ctx->spotify, tracks[track_index].spotify_id, ctx->audio_buf);
                         break;
                     }
                     //Continue playing recommendations
@@ -226,12 +145,11 @@ handle_action(int fd, short what, void *arg) {
                     next_tracks = NULL;
                     next_track_count = 0;
                     track_index = 0;
-                    free_playlist(&cplaylist);
                 } else {
                     track_index += a.position;
                 }
             }
-            redo_audio(ctx);
+            play_track(ctx->spotify, tracks[track_index].spotify_id, ctx->audio_buf);
             break;
         }
         case ACTION_POSITION_ABSOLUTE: {
@@ -240,21 +158,15 @@ handle_action(int fd, short what, void *arg) {
             stop();
             if (a.position >= track_count || a.position < 0) break;
             track_index = a.position;
-            redo_audio(ctx);
             break;
         }
         case ACTION_TRACK: {
             printf("[ctrl] Starting track with id %s\n", a.id);
-            if (started) {
-//                pause();
-//                stop();
-                free_tracks(tracks, track_count);
-                tracks = NULL;
-            }
+
+            clear_tracks(tracks, &track_count, &track_size);
             track_index = 0;
-            track_count = 0;
-            add_track_info(ctx->spotify, a.id, &tracks, &track_size, &track_count);
-            play_track(ctx->spotify, a.id, ctx->audio_buf);
+
+            add_track_info(ctx->spotify, a.id, &tracks, &track_size, &track_count, tracks_loaded_cb);
             break;
         }
         case ACTION_SEEK: {
@@ -286,19 +198,20 @@ int main(int argc, char **argv) {
     }
 
     struct spotify_state state;
+    memset(&state, 0, sizeof(state));
     state.connections_len = 0;
     state.instances = calloc(1, sizeof(*state.instances));
     state.instances[0] = "127.0.0.1";
     state.instances_len = 1;
     struct smp_context ctx;
+    memset(&ctx, 0, sizeof(ctx));
     ctx.base = event_base_new();
     ctx.spotify = &state;
     state.base = ctx.base;
     state.smp_ctx = &ctx;
-    ctx.audio_info.previous = &ctx.previous;
 
 //    volume = initial_volume;
-    volume = 0.5;
+    volume = 0.05;
     struct evbuffer *audio_buf = evbuffer_new();
     ctx.audio_buf = audio_buf;
     init(&ctx, audio_buf);
@@ -323,10 +236,11 @@ int main(int argc, char **argv) {
     }
 
     clean_audio();
-    free_playlist(&cplaylist);
     cleanup();
     clean_config();
-    evbuffer_free(audio_buf);
+    event_free(fd_event);
+    event_base_free(ctx.base);
+    free(state.instances);
 
     return EXIT_SUCCESS;
 }

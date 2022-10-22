@@ -8,7 +8,6 @@
 #include "spotify.h"
 #include <semaphore.h>
 
-extern PlaylistInfo cplaylist;
 extern size_t track_index;
 extern Track *tracks;
 extern size_t track_count;

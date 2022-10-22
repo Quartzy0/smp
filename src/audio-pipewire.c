@@ -117,15 +117,15 @@ int stop() {
     return 0;
 }
 
-int start(struct audio_info *info) {
-    if (started && info->previous && info->previous->channels == info->channels &&
-        info->previous->sample_rate == info->sample_rate) {
+int start(struct audio_info *info, struct audio_info *previous) {
+    if (started && previous && previous->channels == info->channels &&
+        previous->sample_rate == info->sample_rate) {
         printf("[audio] Using same audio stream\n");
         evbuffer_drain(data.audio_buf, -1);
         return play();
     }
     printf("[audio] Starting audio new stream\n");
-    memcpy(info->previous, info, sizeof(*info));
+    memcpy(previous, info, sizeof(*info));
     stop();
     const struct spa_pod *params[1];
     uint8_t buffer[1024];

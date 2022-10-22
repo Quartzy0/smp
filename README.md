@@ -1,4 +1,7 @@
 # Simple Music Player
+
+# THIS BRANCH IS STILL WIP, MOST FEATURES ARE NOT YET FUNCTIONAL
+
 ### About
 The simple music player is a music player which automatically downloads music from spotify playlists/albums and plays it.
 It was created as an alternative to [spotifyd](https://github.com/Spotifyd/spotifyd). Unlike spotifyd, this music player

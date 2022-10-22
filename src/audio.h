@@ -22,7 +22,7 @@ int set_file(const char *filename);
 
 int set_pcm_stream(FILE *fp);
 
-int start(struct audio_info *info);
+int start(struct audio_info *info, struct audio_info *previous);
 
 int stop();
 

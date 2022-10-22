@@ -157,10 +157,10 @@ void get_playlist_maybe(DBusMessageIter *iter) {
     DBusMessageIter bools;
     dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &bools);
 
-    dbus_bool_t value = started * cplaylist.not_empty;
+    dbus_bool_t value = started && tracks[0].playlist && tracks[0].playlist->not_empty;
     dbus_message_iter_append_basic(&bools, DBUS_TYPE_BOOLEAN, &value);
 
-    get_playlist_dbus(&bools, (PlaylistInfo *) (value * (uint64_t) &cplaylist) /* No branching ;) */);
+    get_playlist_dbus(&bools, (PlaylistInfo *) (value * (uint64_t) tracks[0].playlist) /* No branching ;) */);
     dbus_message_iter_close_container(iter, &bools);
 }
 
@@ -727,7 +727,7 @@ int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
         size_t objLen = strlen(obj);
         Action a = {.type = obj[objLen - 1] == 'a' ? ACTION_ALBUM : ACTION_PLAYLIST};
         memcpy(a.id, &obj[objLen - 23], 22 * sizeof(char));
-        a.id[22] = 0;
+        a.id[SPOTIFY_ID_LEN] = 0;
         write(ctx->action_fd[1], &a, sizeof(a));
         sem_post(&state_change_lock);
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "GetPlaylists")) {

@@ -66,7 +66,6 @@ struct smp_context{
         size_t offset;
         size_t total_frames;
         int channels;
-        struct audio_info *previous;
     } audio_info;
     struct audio_info previous;
 };
@@ -94,12 +93,16 @@ struct decode_context{
     int zero_count;
 };
 
-typedef void(*audio_info_cb)(struct audio_info *info);
+typedef void(*audio_info_cb)(struct audio_info *info, struct audio_info *previous);
 
 extern LoopMode loop_mode;
 extern bool shuffle;
 
 int read_url(const char *url, Response *response, struct curl_slist *headers);
+
+#ifndef VEC_STEP
+#define VEC_STEP 10
+#endif
 
 // https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
 char *urlencode(const char *src);
@@ -129,6 +132,6 @@ FILE *fopen_mkdir(const char *path, char *mode);
 
 int
 decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
-              struct audio_info *info, audio_info_cb cb);
+              struct audio_info *info, struct audio_info *previous, audio_info_cb cb);
 
 #endif

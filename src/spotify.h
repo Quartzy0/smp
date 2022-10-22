@@ -25,6 +25,18 @@ typedef enum DownloadState {
     DS_DOWNLOAD_FAILED
 } DownloadState;
 
+typedef struct PlaylistInfo {
+    bool not_empty; //Used when no playlist is playing
+    bool album; //This struct represents both playlists and albums.
+    char *name;
+    char *image_url;
+    char spotify_id[SPOTIFY_ID_LEN_NULL];
+    time_t last_played;
+    uint32_t track_count;
+
+    size_t reference_count; // Used when songs from multiple playlists are in the queue allowing each track to point to the correct playlist
+} PlaylistInfo;
+
 typedef struct Track {
     char spotify_id[SPOTIFY_ID_LEN_NULL];
     char spotify_uri[SPOTIFY_URI_LEN_NULL];
@@ -36,17 +48,8 @@ typedef struct Track {
     char spotify_artist_id[SPOTIFY_ID_LEN_NULL];
     uint32_t duration_ms;
     uint32_t download_state; //enum DownloadState
+    PlaylistInfo *playlist;
 } Track;
-
-typedef struct PlaylistInfo {
-    bool not_empty; //Used when no playlist is playing
-    bool album; //This struct represents both playlists and albums.
-    char *name;
-    char *image_url;
-    char spotify_id[SPOTIFY_ID_LEN_NULL];
-    time_t last_played;
-    uint32_t track_count;
-} PlaylistInfo;
 
 enum spotify_packet_type {
     MUSIC_DATA = 0,
@@ -65,13 +68,23 @@ enum error_type {
 struct connection;
 
 typedef void (*spotify_conn_cb)(struct bufferevent *bev, struct connection *conn, void *arg);
+typedef int(*json_parse_func)(char *data, size_t len, Track **tracks, size_t *track_size, size_t *track_len);
+typedef void(*info_received_cb)(struct spotify_state *spotify, Track *tracks);
 
-struct spotify_state{
-    struct connection{
+struct parse_func_params{
+    Track **tracks;
+    size_t *track_size;
+    size_t *track_len;
+    char *path;
+    json_parse_func func;
+    info_received_cb func1;
+};
+
+struct spotify_state {
+    struct connection {
         struct bufferevent *bev;
         bool busy;
 
-        enum spotify_packet_type last_packet;
         size_t expecting;
         size_t progress;
         struct spotify_state *spotify;
@@ -79,6 +92,7 @@ struct spotify_state{
         void *cb_arg;
         FILE *cache_fp;
         char *cache_path;
+        struct parse_func_params params;
 
         char *error_buffer;
         enum error_type error_type;
@@ -95,11 +109,19 @@ void get_token();
 
 void ensure_token();
 
-void * init_spotify(void *state);
+void *init_spotify(void *state);
 
-int play_track(struct spotify_state *spotify, char id[22], struct evbuffer *buf);
+void clear_tracks(Track *tracks, size_t *track_len, size_t *track_size);
 
-int add_track_info(struct spotify_state *spotify, char id[22], Track **tracks, size_t *track_size, size_t *track_len);
+int play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct evbuffer *buf);
+
+int ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]);
+
+int add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size, size_t *track_len,
+                   info_received_cb func);
+
+int add_playlist(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size, size_t *track_len,
+                 bool album, info_received_cb func);
 
 int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
            PlaylistInfo **albums, size_t *album_count);
@@ -109,6 +131,8 @@ int track_by_id(const char *id, Track **track);
 int get_playlist(char *playlistId, PlaylistInfo *playlistOut, Track **tracksOut);
 
 int get_album(char *albumId, PlaylistInfo *playlistOut, Track **tracksOut);
+
+void free_track(Track *track);
 
 void free_tracks(Track *track, size_t count);
 

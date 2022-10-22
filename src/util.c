@@ -173,7 +173,7 @@ FILE
 
 int
 decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
-              struct audio_info *info, audio_info_cb cb) {
+              struct audio_info *info, struct audio_info *previous, audio_info_cb cb) {
     switch (ctx->state) {
         case START: {
             ogg_sync_init(&ctx->oy);
@@ -221,7 +221,7 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
                     info->sample_rate = ctx->vi.rate;
                     info->bitrate = ctx->vi.bitrate_nominal;
                     info->channels = ctx->vi.channels;
-                    if (cb) cb(info);
+                    if (cb) cb(info, previous);
                     if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
                         fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
                         exit(1);

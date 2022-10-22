@@ -14,8 +14,12 @@
 uint32_t preload_amount;
 char *track_save_path;
 size_t track_save_path_len;
-char *track_info_path = "/home/quartzy/dev/smp/debug/cache/smp/info/";
-size_t track_info_path_len = 43;
+char *track_info_path = "/home/quartzy/dev/smp/debug/cache/smp/track_info/";
+size_t track_info_path_len = 49;
+char *album_info_path = "/home/quartzy/dev/smp/debug/cache/smp/album_info/";
+size_t album_info_path_len = 49;
+char *playlist_info_path = "/home/quartzy/dev/smp/debug/cache/smp/playlist_info/";
+size_t playlist_info_path_len = 52;
 char *playlist_save_path;
 size_t playlist_save_path_len;
 double initial_volume;
