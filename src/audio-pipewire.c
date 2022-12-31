@@ -32,10 +32,10 @@ static void on_process(void *userdata) {
     Data *data = userdata;
     struct pw_buffer *b;
     struct spa_buffer *buf;
-    unsigned int i, n_frames, stride;
+    unsigned int i, stride;
     float *dst;
 
-    if (!evbuffer_get_length(data->audio_buf)) return;
+    if (!evbuffer_get_length(data->audio_buf) || !data->ctx->audio_info.channels) return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
         pw_log_warn("out of buffers: %m");
@@ -60,7 +60,6 @@ static void on_process(void *userdata) {
     }
 
     stride = sizeof(*dst) * data->ctx->audio_info.channels;
-    n_frames = buf->datas[0].maxsize / stride;
 
     size_t num_read = evbuffer_remove(data->audio_buf, dst, buf->datas[0].maxsize);
     data->ctx->audio_info.offset += num_read;
@@ -69,11 +68,16 @@ static void on_process(void *userdata) {
     for (i = 0; i < num_read / sizeof(*dst); ++i) {
         dst[i] *= volumeMultiplier;
     }
+    if (data->ctx->audio_info.finished_reading && data->ctx->audio_info.total_frames <= data->ctx->audio_info.offset / stride){
+        Action a = {.type = ACTION_TRACK_OVER};
+        a.position = 1;
+        write(data->ctx->action_fd[1], &a, sizeof(a));
+    }
 
     finish:
     buf->datas[0].chunk->offset = 0;
     buf->datas[0].chunk->stride = (int) stride;
-    buf->datas[0].chunk->size = n_frames * stride;
+    buf->datas[0].chunk->size = buf->datas[0].maxsize;
 
     pw_stream_queue_buffer(data->stream, b);
 }
@@ -118,6 +122,8 @@ int stop() {
 }
 
 int start(struct audio_info *info, struct audio_info *previous) {
+    previous->offset = 0;
+    info->offset = 0;
     if (started && previous && previous->channels == info->channels &&
         previous->sample_rate == info->sample_rate) {
         printf("[audio] Using same audio stream\n");

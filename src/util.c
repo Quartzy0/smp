@@ -221,6 +221,8 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
                     info->sample_rate = ctx->vi.rate;
                     info->bitrate = ctx->vi.bitrate_nominal;
                     info->channels = ctx->vi.channels;
+                    info->finished_reading = false;
+                    info->total_frames = 0;
                     if (cb) cb(info, previous);
                     if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
                         fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
@@ -300,7 +302,7 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
 
 
                                 evbuffer_add(buf_out, pcmi, samples * ctx->vi.channels * sizeof(*pcmi));
-//                                fwrite(pcmi, samples * decode_ctx->vi.channels * sizeof(*pcmi), 1, fp);
+                                info->total_frames += samples;
 
                                 ctx->p += samples * ctx->vi.channels * sizeof(*pcmi);
 
@@ -322,6 +324,7 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
             return 1;
             eos:
             ctx->state = EOS;
+            info->finished_reading = true;
             vorbis_block_clear(&ctx->vb);
             vorbis_dsp_clear(&ctx->vd);
             ogg_stream_clear(&ctx->os);
@@ -336,4 +339,15 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
         }
     }
     return 1;
+}
+
+void
+clean_vorbis_decode(struct decode_context *ctx){
+    ctx->state = EOS;
+    vorbis_block_clear(&ctx->vb);
+    vorbis_dsp_clear(&ctx->vd);
+    ogg_stream_clear(&ctx->os);
+    vorbis_comment_clear(&ctx->vc);
+    vorbis_info_clear(&ctx->vi);
+    ogg_sync_clear(&ctx->oy);
 }

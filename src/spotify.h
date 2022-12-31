@@ -12,7 +12,7 @@
 #define SPOTIFY_ID_LEN_NULL (SPOTIFY_ID_LEN+1)
 #define SPOTIFY_URI_LEN 36
 #define SPOTIFY_URI_LEN_NULL (SPOTIFY_URI_LEN+1)
-#define PLAYLIST_NAME_LEN (SPOTIFY_ID_LEN+1)
+#define PLAYLIST_NAME_LEN SPOTIFY_ID_LEN
 #define PLAYLIST_NAME_LEN_NULL (PLAYLIST_NAME_LEN+1)
 #define CONNECTION_POOL_MAX 10
 #define SPOTIFY_MAX_INSTANCES 10
@@ -68,10 +68,12 @@ enum error_type {
 struct connection;
 
 typedef void (*spotify_conn_cb)(struct bufferevent *bev, struct connection *conn, void *arg);
-typedef int(*json_parse_func)(char *data, size_t len, Track **tracks, size_t *track_size, size_t *track_len);
+
+typedef int(*json_parse_func)(const char *data, size_t len, Track **tracks, size_t *track_size, size_t *track_len);
+
 typedef void(*info_received_cb)(struct spotify_state *spotify, Track *tracks);
 
-struct parse_func_params{
+struct parse_func_params {
     Track **tracks;
     size_t *track_size;
     size_t *track_len;
@@ -117,11 +119,20 @@ int play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], str
 
 int ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]);
 
-int add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size, size_t *track_len,
+int add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
+                   size_t *track_len,
                    info_received_cb func);
 
-int add_playlist(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size, size_t *track_len,
+int add_playlist(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
+                 size_t *track_len,
                  bool album, info_received_cb func);
+
+int add_recommendations(struct spotify_state *spotify, const char *track_ids,
+                        const char *artist_ids, size_t track_count, size_t artist_count, Track **tracks,
+                        size_t *track_size, size_t *track_len, info_received_cb func);
+
+int add_recommendations_from_tracks(struct spotify_state *spotify, Track **tracks,
+                                    size_t *track_size, size_t *track_len, info_received_cb func);
 
 int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
            PlaylistInfo **albums, size_t *album_count);
@@ -144,12 +155,6 @@ void track_filepath(Track *track, char **out);
 
 void playlist_filepath(char *id, char **out, bool album);
 
-int get_recommendations(char **seed_tracks, size_t seed_track_count, char **seed_artists, size_t seed_artist_count,
-                        char **seed_genres, size_t genre_count, size_t limit, Track **tracksOut, size_t *track_count);
-
-int get_recommendations_from_tracks(Track *tracks, size_t track_count, size_t limit, Track **tracksOut,
-                                    size_t *track_count_out);
-
 void save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks);
 
 void save_playlist_last_played_to_file(const char *path, PlaylistInfo *playlist);
@@ -160,7 +165,7 @@ void read_playlist_info_from_file(const char *path, PlaylistInfo *playlistOut);
 
 size_t get_saved_playlist_count();
 
-void get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *count);
+int get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *countOut);
 
 void cleanup();
 

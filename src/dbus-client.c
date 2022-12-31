@@ -9,6 +9,11 @@
 #include <unistd.h>
 #include <malloc.h>
 
+#define MAX_REPLY_WAIT_TIME 1000 // in ms
+#define REPLY_WAIT_TIME_CHECK_TIME 10000 // in us
+
+#define REPLY_WAIT_LOOP_COUNT ((MAX_REPLY_WAIT_TIME*1000)/REPLY_WAIT_TIME_CHECK_TIME+1)
+
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
 DBusConnection *client_conn;
@@ -106,12 +111,12 @@ get_player_properties(PlayerProperties *properties) {
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) {
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) {
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
 
@@ -175,12 +180,12 @@ dbus_client_call_method(const char *iface, const char *method) {
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Make sure to get the empty reply that is sent as a response */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
 }
@@ -220,12 +225,12 @@ dbus_client_open(const char *uri) {
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Make sure to get the empty reply that is sent as a response */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
 }
@@ -249,12 +254,12 @@ dbus_client_set_property(const char *iface, const char *name, int type, void *va
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Make sure to get the empty reply that is sent as a response */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
 }
@@ -271,12 +276,12 @@ dbus_client_get_property_reply(const char *iface, const char *name, DBusMessage 
     dbus_connection_send(client_conn, msg, &serial);
     dbus_message_unref(msg);
 
-    for (int j = 0; j < 5; ++j) { /* Get reply */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Get reply */
         dbus_connection_read_write(client_conn, 0);
         *reply = dbus_connection_pop_message(client_conn);
 
         if (*reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
 
     if (!*reply) {
@@ -299,12 +304,12 @@ dbus_client_get_property(const char *iface, const char *name, int type, void *va
     dbus_message_unref(msg);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Get reply */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Get reply */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
 
     if (!reply) {
@@ -425,12 +430,12 @@ dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out) {
     dbus_message_unref(msg);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Get reply */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Get reply */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
 
     if (!reply) {
@@ -494,12 +499,12 @@ dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder orde
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Make sure to get the empty reply that is sent as a response */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
     if (!reply){
@@ -579,12 +584,12 @@ dbus_client_activate_playlist(const char *id /* DBus object path */){
     dbus_connection_send(client_conn, msg, &serial);
 
     DBusMessage *reply;
-    for (int j = 0; j < 5; ++j) { /* Make sure to get the empty reply that is sent as a response */
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) { /* Make sure to get the empty reply that is sent as a response */
         dbus_connection_read_write(client_conn, 0);
         reply = dbus_connection_pop_message(client_conn);
 
         if (reply) break;
-        usleep(10000);
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
     return reply != NULL;

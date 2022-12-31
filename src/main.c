@@ -7,8 +7,6 @@
 #include "audio.h"
 #include "dbus.h"
 #include "util.h"
-#include <linux/futex.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include "config.h"
 #include "cli.h"
@@ -20,35 +18,15 @@ size_t track_count;
 size_t track_size;
 Track *next_tracks = NULL;
 size_t next_track_count = 0;
-pthread_t prepare_thread;
-
-struct RecommendationParams {
-    Track *tracks;
-    size_t track_count;
-    Track **next_tracks;
-    size_t *next_track_count;
-};
 
 void
-tracks_loaded_cb(struct spotify_state *spotify, Track *tracks){
-    play_track(spotify, tracks[0].spotify_id, spotify->smp_ctx->audio_buf);
-}
-
-void *
-prepare_recommendations(void *userp) {
-    struct RecommendationParams *params = (struct RecommendationParams *) userp;
-    printf("[ctrl - recommendations] Looking for recommendations\n");
-    get_recommendations_from_tracks(params->tracks, params->track_count, 30, params->next_tracks,
-                                    params->next_track_count);
-    printf("[ctrl - recommendations] Done. Wake: %ld\n",
-           syscall(SYS_futex, &next_track_count, FUTEX_WAKE, INT_MAX, NULL, 0, 0));
-    free(params);
-    return NULL;
+tracks_loaded_cb(struct spotify_state *spotify, Track *tracks) {
+    play_track(spotify, tracks[track_index].spotify_id, spotify->smp_ctx->audio_buf);
 }
 
 void
 handle_action(int fd, short what, void *arg) {
-    struct smp_context *ctx = (struct smp_context*) arg;
+    struct smp_context *ctx = (struct smp_context *) arg;
     Action a;
     read(fd, &a, sizeof(a));
     switch (a.type) {
@@ -105,8 +83,6 @@ handle_action(int fd, short what, void *arg) {
         case ACTION_TRACK_OVER:
         case ACTION_POSITION_RELATIVE: {
             if (!started) break;
-            pause();
-            stop();
             if (a.type == ACTION_TRACK_OVER && loop_mode == LOOP_MODE_TRACK) {
                 //Do nothing
             } else if (shuffle) {
@@ -123,28 +99,9 @@ handle_action(int fd, short what, void *arg) {
                         break;
                     }
                     //Continue playing recommendations
-                    if (next_track_count == 0) {
-                        if (get_recommendations_from_tracks(tracks, track_count, 30, &next_tracks,
-                                                            &next_track_count))
-                            break;
-                    } else if (next_track_count == -1) {
-                        while (next_track_count == -1) {
-                            printf("[ctrl] Sleep sleep... (recommendations)\n");
-                            if (syscall(SYS_futex, &next_track_count, FUTEX_WAIT, -1, NULL,
-                                        0, 0) == -1) {
-                                fprintf(stderr, "Error when waiting for recommendations: %s\n", strerror(errno));
-                                break;
-                            }
-                        }
-                    }
-                    pthread_join(prepare_thread, NULL);
-                    free_tracks(tracks, track_count);
-                    tracks = NULL;
-                    tracks = next_tracks;
-                    track_count = next_track_count;
-                    next_tracks = NULL;
-                    next_track_count = 0;
-                    track_index = 0;
+                    add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count, tracks_loaded_cb);
+                    track_index++;
+                    break;
                 } else {
                     track_index += a.position;
                 }
@@ -175,8 +132,10 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
         case ACTION_SET_POSITION: {
-            int64_t seek_new = -(((int64_t) (ctx->audio_info.offset / ctx->audio_info.sample_rate) * 1000000) - a.position);
-            if ((int64_t) seek_new > (int64_t) (frames / ctx->audio_info.sample_rate) * 1000000) break; // TODO: 'frames' no longer exists
+            int64_t seek_new = -(((int64_t) (ctx->audio_info.offset / ctx->audio_info.sample_rate) * 1000000) -
+                                 a.position);
+            if ((int64_t) seek_new > (int64_t) (frames / ctx->audio_info.sample_rate) * 1000000)
+                break; // TODO: 'frames' no longer exists
             seek = seek_new;
             printf("[ctrl] Set position to: %ld\n", seek);
             break;
@@ -189,7 +148,7 @@ handle_action(int fd, short what, void *arg) {
 
 int main(int argc, char **argv) {
     srand(clock());
-    if(handle_cli(argc, argv)){
+    if (handle_cli(argc, argv)) {
         return EXIT_SUCCESS;
     }
 
@@ -238,8 +197,13 @@ int main(int argc, char **argv) {
     clean_audio();
     cleanup();
     clean_config();
-    event_free(fd_event);
+    if (fd_event) event_free(fd_event);
     event_base_free(ctx.base);
+    clean_vorbis_decode(&ctx.spotify->decode_ctx);
+    for (int i = 0; i < sizeof(ctx.spotify->connections) / sizeof(*ctx.spotify->connections); ++i) {
+        free(ctx.spotify->connections[i].cache_path);
+    }
+    clear_tracks(tracks, &track_count, &track_size);
     free(state.instances);
 
     return EXIT_SUCCESS;

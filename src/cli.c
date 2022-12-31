@@ -157,17 +157,21 @@ track(int argc, char **argv) {
                 char **tracks = NULL;
                 int count = 0;
                 dbus_client_tracklist_get_tracks(&tracks, &count);
-                Metadata *metadata = calloc(count, sizeof(*metadata));
-                dbus_client_get_tracks_metadata(tracks, count, metadata);
-                for (int i = 0; i < count; ++i) {
-                    printf("[%d] '%s' by '%s' (%s)\n", i + 1, metadata[i].title, metadata[i].artist, metadata[i].url);
-                }
-                for (int i = 0; i < count; ++i) {
-                    free(tracks[i]);
-                    free_metadata(&metadata[i]);
+                if (count != 0){
+                    Metadata *metadata = calloc(count, sizeof(*metadata));
+                    dbus_client_get_tracks_metadata(tracks, count, metadata);
+                    for (int i = 0; i < count; ++i) {
+                        printf("[%d] '%s' by '%s' (%s)\n", i + 1, metadata[i].title, metadata[i].artist, metadata[i].url);
+                    }
+                    for (int i = 0; i < count; ++i) {
+                        free(tracks[i]);
+                        free_metadata(&metadata[i]);
+                    }
+                    free(metadata);
+                }else{
+                    printf("No tracks loaded\n");
                 }
                 free(tracks);
-                free(metadata);
                 break;
             case '?':
                 printf(HELP_TXT_TRACK);

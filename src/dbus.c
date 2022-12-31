@@ -380,7 +380,7 @@ void get_mediaplayer_tracklist(DBusMessage *msg, char *property) {
         DBusMessageIter arr_val;
         dbus_message_iter_open_container(&var, DBUS_TYPE_ARRAY, "o", &arr_val);
 
-        const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
+        static const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
         char *object = malloc(sizeof(base_path) + 22 * sizeof(*object)); //Enough space for ids
         object[sizeof(base_path) + 22 - 1] = 0;
         memcpy(object, base_path, sizeof(base_path) - 1);
@@ -744,7 +744,7 @@ int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
         }
         PlaylistInfo *playlists;
         size_t count;
-        get_all_playlist_info(&playlists, &count);
+        int func_ret = get_all_playlist_info(&playlists, &count);
 
         int (*compar)(const void *, const void *) = compare_alphabetical;
         if (reverse_order) {
@@ -762,8 +762,8 @@ int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
         DBusMessageIter reply, arr;
         dbus_message_iter_init_append(ret, &reply);
         dbus_message_iter_open_container(&reply, DBUS_TYPE_ARRAY, "(oss)", &arr);
-        for (uint32_t i = 0; i < count_clipped; ++i) {
-            get_playlist_dbus(&arr, &playlists[i + index]);
+        for (uint32_t i = index; i < count && i < index+max_count; ++i) {
+            get_playlist_dbus(&arr, &playlists[i]);
         }
         dbus_message_iter_close_container(&reply, &arr);
 
@@ -802,10 +802,10 @@ int check_tracklist_command(DBusMessage *msg, struct smp_context *ctx) {
         DBusMessageIter reply, arr;
         dbus_message_iter_init_append(ret, &reply);
         dbus_message_iter_open_container(&reply, DBUS_TYPE_ARRAY, "a{sv}", &arr);
+        const size_t id_offset = strrchr(objs[0], '/') - objs[0] + 1;
         for (size_t i = 0; i < track_count; ++i) {
             for (size_t j = 0; j < len; ++j) {
-                const char *id = strrchr(objs[j], '/');
-                if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
+                if (strcmp(objs[j]+ id_offset, tracks[i].spotify_id) != 0)continue;
                 get_track_metadata(&arr, &tracks[i]);
             }
         }
@@ -876,7 +876,6 @@ handle_message(struct smp_context *ctx) {
                 // Default to giving information about our capabilities as a player,
                 // but if asked give information about our capabilities through MPRIS
                 dbus_message_iter_get_basic(&args, &param);
-                printf("[dbus] Status\n");
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     getall_mediaplayer(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
@@ -908,7 +907,6 @@ handle_message(struct smp_context *ctx) {
                 }
                 char *property;
                 dbus_message_iter_get_basic(&args, &property);
-                printf("[dbus] Status\n");
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     get_mediaplayer(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {

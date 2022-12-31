@@ -66,6 +66,7 @@ struct smp_context{
         size_t offset;
         size_t total_frames;
         int channels;
+        bool finished_reading;
     } audio_info;
     struct audio_info previous;
 };
@@ -133,5 +134,8 @@ FILE *fopen_mkdir(const char *path, char *mode);
 int
 decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
               struct audio_info *info, struct audio_info *previous, audio_info_cb cb);
+
+void
+clean_vorbis_decode(struct decode_context *ctx);
 
 #endif
