@@ -101,8 +101,6 @@ struct spotify_state {
     } connections[CONNECTION_POOL_MAX];
     size_t connections_len;
     struct event_base *base;
-    char **instances;
-    size_t instances_len;
     struct decode_context decode_ctx;
     struct smp_context *smp_ctx;
 };

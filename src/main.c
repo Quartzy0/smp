@@ -159,9 +159,6 @@ int main(int argc, char **argv) {
     struct spotify_state state;
     memset(&state, 0, sizeof(state));
     state.connections_len = 0;
-    state.instances = calloc(1, sizeof(*state.instances));
-    state.instances[0] = "127.0.0.1";
-    state.instances_len = 1;
     struct smp_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.base = event_base_new();
@@ -204,7 +201,6 @@ int main(int argc, char **argv) {
         free(ctx.spotify->connections[i].cache_path);
     }
     clear_tracks(tracks, &track_count, &track_size);
-    free(state.instances);
 
     return EXIT_SUCCESS;
 }

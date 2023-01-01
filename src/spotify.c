@@ -14,7 +14,6 @@
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include "config.h"
-#include "downloader.h"
 #include "audio.h"
 
 const char recommendations_base_url[] = "https://api.spotify.com/v1/recommendations?seed_tracks=";
@@ -297,41 +296,6 @@ free_playlist(PlaylistInfo *playlist) {
 }
 
 void
-download_track(Track *track, bool block, FILE **pcm) {
-    if (track->download_state == DS_DOWNLOAD_FAILED) return;
-    if (track->download_state != DS_NOT_DOWNLOADED) {
-        printf("[spotify] Track '%s' already downloaded or is downloading\n", track->spotify_name);
-        return;
-    }
-    char *track_file = NULL;
-    track_filepath(track, &track_file);
-    if (!access(track_file, R_OK)) {
-        track->download_state = DS_DOWNLOADED;
-        printf("[spotify] Track '%s' already downloaded\n", track->spotify_name);
-        free(track_file);
-        return; // Track was already downloaded
-    }
-    free(track_file);
-
-    track->download_state = DS_DOWNLOADING;
-
-    printf("[spotify] Track '%s' by '%s' needs to be downloaded. Searching...\n", track->spotify_name,
-           track->artist);
-
-    DownloadParams *params = malloc(sizeof(*params));
-    params->track = track;
-    params->path_out = track_save_path;
-
-    if (block) {
-        *pcm = search_and_get_pcm(params);
-    } else {
-        pthread_t t;
-        pthread_create(&t, NULL, search_and_download, params);
-        pthread_detach(t);
-    }
-}
-
-void
 cleanup() {
     curl_slist_free_all(auth_header);
 }
@@ -374,15 +338,6 @@ playlist_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     snprintf((*out), playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", playlist_info_path,
              id);
     out[playlist_info_path_len + SPOTIFY_ID_LEN + 5] = 0;
-}
-
-void
-playlist_filepath(char *id, char **out, bool album) {
-    (*out) = malloc(strlen(id) * sizeof(char) + playlist_save_path_len + 2);
-    memcpy(*out, playlist_save_path, playlist_save_path_len);
-    memcpy(*out + playlist_save_path_len, id, strlen(id));
-    (*out)[strlen(id) + playlist_save_path_len] = album ? 'a' : 'p';
-    (*out)[strlen(id) + playlist_save_path_len + 1] = 0;
 }
 
 size_t
@@ -484,12 +439,12 @@ spotify_connect(struct spotify_state *spotify) {
         }
     }
     if (spotify->connections_len >= CONNECTION_POOL_MAX) return NULL;
-    size_t inst = (size_t) (((float) rand() / (float) RAND_MAX) * (float) (spotify->instances_len - 1));
-    printf("[spotify] Creating new connection to %s\n", spotify->instances[inst]);
+    char *inst = random_backend_instance;
+    printf("[spotify] Creating new connection to %s\n", inst);
     spotify->connections_len++;
     spotify->connections[i].bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(spotify->connections[i].bev, EV_READ | EV_WRITE);
-    if (bufferevent_socket_connect_hostname(spotify->connections[i].bev, NULL, AF_UNSPEC, spotify->instances[inst],
+    if (bufferevent_socket_connect_hostname(spotify->connections[i].bev, NULL, AF_UNSPEC, inst,
                                             SPOTIFY_PORT) != 0) {
         bufferevent_free(spotify->connections[i].bev);
         return NULL;
