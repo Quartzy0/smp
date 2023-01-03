@@ -211,7 +211,7 @@ void get_mediaplayer(DBusMessage *msg, char *property) {
     dbus_message_unref(reply);
 }
 
-void get_mediaplayer_player(DBusMessage *msg, char *property, struct audio_info *info) {
+void get_mediaplayer_player(DBusMessage *msg, char *property, struct smp_context *ctx) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -284,7 +284,7 @@ void get_mediaplayer_player(DBusMessage *msg, char *property, struct audio_info 
         dbus_message_iter_append_basic(&var, DBUS_TYPE_DOUBLE, &volume);
     } else if (!strcmp(property, "Position") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "x", &var);
-        int64_t position = ((int64_t) info->offset / info->sample_rate) * 1000000; //Convert to micoseconds
+        int64_t position = ((int64_t) ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000; //Convert to micoseconds
         dbus_message_iter_append_basic(&var, DBUS_TYPE_INT64, &position);
     } else if (!strcmp(property, "Metadata") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "a{sv}", &var);
@@ -454,7 +454,7 @@ void getall_mediaplayer(DBusMessage *msg) {
 }
 
 // Tell about our capabilities, few as they are
-void getall_mediaplayer_player(DBusMessage *msg, struct audio_info *info) {
+void getall_mediaplayer_player(DBusMessage *msg, struct smp_context *ctx) {
     dbus_uint32_t serial = 0;
     // Generate a message to return
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -497,7 +497,7 @@ void getall_mediaplayer_player(DBusMessage *msg, struct audio_info *info) {
 
     //Metadata
     if (started) {
-        int64_t position = ((int64_t) info->offset / info->sample_rate) * 1000000; //Convert to micoseconds
+        int64_t position = ((int64_t) ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000; //Convert to micoseconds
         add_dict_entry_p(&dict, "Position", &position, DBUS_TYPE_INT64);
         DBusMessageIter dict_entry, dict_val;
         // Create our entry in the dictionary
@@ -879,7 +879,7 @@ handle_message(struct smp_context *ctx) {
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     getall_mediaplayer(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    getall_mediaplayer_player(msg, &ctx->audio_info);
+                    getall_mediaplayer_player(msg, ctx);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
                     getall_mediaplayer_playlists(msg);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {
@@ -910,7 +910,7 @@ handle_message(struct smp_context *ctx) {
                 if (strcmp(param, "org.mpris.MediaPlayer2") == 0) {
                     get_mediaplayer(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Player") == 0) {
-                    get_mediaplayer_player(msg, property, &ctx->audio_info);
+                    get_mediaplayer_player(msg, property, ctx);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.Playlists") == 0) {
                     get_mediaplayer_playlists(msg, property);
                 } else if (strcmp(param, "org.mpris.MediaPlayer2.TrackList") == 0) {

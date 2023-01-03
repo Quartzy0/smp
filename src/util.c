@@ -172,7 +172,7 @@ FILE
 }
 
 int
-decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
+decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context *ctx, size_t *progress,
               struct audio_info *info, struct audio_info *previous, audio_info_cb cb) {
     switch (ctx->state) {
         case START: {
@@ -266,8 +266,8 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
                         } else {
                             /* we have a packet.  Decode it */
                             float **pcm;
-                            float *pcmi = NULL;
-                            size_t pcmi_len = 0;
+                            /*float *pcmi = NULL;
+                            size_t pcmi_len = 0;*/
                             int samples;
 
                             if (vorbis_synthesis(&ctx->vb, &ctx->op) == 0) /* test for success! */
@@ -281,36 +281,42 @@ decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_conte
 
                             while ((samples = vorbis_synthesis_pcmout(&ctx->vd, &pcm)) > 0) {
 
-                                if (!pcmi) {
-                                    pcmi = calloc(samples * ctx->vi.channels, sizeof(*pcmi));
-                                    pcmi_len = samples * ctx->vi.channels;
+                            /*if (!pcmi) {
+                                pcmi = calloc(samples * ctx->vi.channels, sizeof(*pcmi));
+                                pcmi_len = samples * ctx->vi.channels;
+                            }
+                            if (pcmi_len < samples * ctx->vi.channels) {
+                                float *tmp = realloc(pcmi, samples * ctx->vi.channels * sizeof(*tmp));
+                                if (!tmp) {
+                                    fprintf(stderr, "realloc error");
+                                    exit(1);
                                 }
-                                if (pcmi_len < samples * ctx->vi.channels) {
-                                    float *tmp = realloc(pcmi, samples * ctx->vi.channels * sizeof(*tmp));
-                                    if (!tmp) {
-                                        fprintf(stderr, "realloc error");
-                                        exit(1);
-                                    }
-                                    pcmi = tmp;
-                                    pcmi_len = samples * ctx->vi.channels;
+                                pcmi = tmp;
+                                pcmi_len = samples * ctx->vi.channels;
+                            }*/
+                                if (buf_out->size < buf_out->len+samples*ctx->vi.channels){
+                                    float *tmp = realloc(buf_out->buf, (buf_out->size+(samples*ctx->vi.channels)*2)*sizeof(*tmp));
+                                    if (!tmp) perror("error when reallocating audio buffer");
+                                    buf_out->buf = tmp;
+                                    buf_out->size = buf_out->size+(samples*ctx->vi.channels)*2;
                                 }
                                 for (int i = 0; i < samples; ++i) {
                                     for (int j = 0; j < ctx->vi.channels; ++j) {
-                                        pcmi[i*ctx->vi.channels+j] = pcm[j][i];
+                                        buf_out->buf[buf_out->len + i*ctx->vi.channels + j] = pcm[j][i];
+//                                        pcmi[i*ctx->vi.channels+j] = pcm[j][i];
                                     }
                                 }
 
-
-                                evbuffer_add(buf_out, pcmi, samples * ctx->vi.channels * sizeof(*pcmi));
+                                buf_out->len += samples * ctx->vi.channels;
                                 info->total_frames += samples;
 
-                                ctx->p += samples * ctx->vi.channels * sizeof(*pcmi);
+                                ctx->p += samples * ctx->vi.channels * sizeof(*buf_out->buf);
 
                                 vorbis_synthesis_read(&ctx->vd, samples); /* tell libvorbis how
                                                       many samples we
                                                       actually consumed */
                             }
-                            free(pcmi);
+//                            free(pcmi);
                         }
                     }
                     if (ogg_page_eos(&ctx->og))goto eos;

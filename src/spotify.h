@@ -113,7 +113,7 @@ void *init_spotify(void *state);
 
 void clear_tracks(Track *tracks, size_t *track_len, size_t *track_size);
 
-int play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct evbuffer *buf);
+int play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf);
 
 int ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]);
 

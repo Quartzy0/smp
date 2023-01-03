@@ -24,7 +24,7 @@ size_t frames;
 typedef struct Data {
     struct pw_thread_loop *loop;
     struct pw_stream *stream;
-    struct evbuffer *audio_buf;
+    struct buffer *audio_buf;
     struct smp_context *ctx;
 } Data;
 
@@ -35,7 +35,11 @@ static void on_process(void *userdata) {
     unsigned int i, stride;
     float *dst;
 
-    if (!evbuffer_get_length(data->audio_buf) || !data->ctx->audio_info.channels) return;
+    if (!data->audio_buf->len || !data->ctx->audio_info.channels || (data->ctx->audio_info.finished_reading &&
+                                                                     data->ctx->audio_info.total_frames <=
+                                                                     data->audio_buf->offset /
+                                                                     data->ctx->audio_info.channels))
+        return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
         pw_log_warn("out of buffers: %m");
@@ -47,28 +51,47 @@ static void on_process(void *userdata) {
         return;
 
     if (seek != 0) {
-        data->ctx->audio_info.offset += (int64_t) ((((double) seek) * 0.000001) *
-                                                   (double) data->ctx->audio_info.sample_rate);
-        seek = 0;
-        if (data->ctx->audio_info.offset < 0) data->ctx->audio_info.offset = 0;
-        else if (data->ctx->audio_info.offset >= /*data->buffer_size*/ 10) {
-            Action a = {.type = ACTION_TRACK_OVER};
-            a.position = 1;
-            write(data->ctx->action_fd[1], &a, sizeof(a));
-            goto finish;
+        int64_t seek_offset = (int64_t) ((((double) seek) * 0.000001) *
+                                         (double) data->ctx->audio_info.sample_rate);
+        if (seek_offset < 0){
+            data->ctx->audio_buf.offset = -seek_offset > data->ctx->audio_buf.offset ? 0 : data->ctx->audio_buf.offset+seek_offset;
+        }else if (data->ctx->audio_info.finished_reading){
+            data->ctx->audio_buf.offset += seek_offset;
+            if (data->ctx->audio_buf.offset >= data->ctx->audio_buf.len){
+                Action a = {.type = ACTION_TRACK_OVER};
+                a.position = 1;
+                write(data->ctx->action_fd[1], &a, sizeof(a));
+                seek = 0;
+                goto finish;
+            }
+        }else{
+            int64_t possible_seek = data->ctx->audio_buf.len-data->ctx->audio_buf.offset;
+            if (possible_seek < seek_offset){
+                data->ctx->audio_buf.offset += possible_seek;
+                seek = (int64_t) ((double) ((seek_offset-possible_seek) / (double) data->ctx->audio_info.sample_rate) / 0.000001);
+                goto nozero;
+            }else{
+                data->ctx->audio_buf.offset += seek_offset;
+            }
         }
+        seek = 0;
+        nozero:;
     }
 
     stride = sizeof(*dst) * data->ctx->audio_info.channels;
 
-    size_t num_read = evbuffer_remove(data->audio_buf, dst, buf->datas[0].maxsize);
-    data->ctx->audio_info.offset += num_read;
+    size_t num_read =
+            buf->datas[0].maxsize < (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf)
+            ? buf->datas[0].maxsize : (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf);
+    memcpy(dst, &data->audio_buf->buf[data->audio_buf->offset], num_read);
+    data->audio_buf->offset += num_read / sizeof(*data->audio_buf->buf);
     const double volumeDb = -6.0;
     const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
     for (i = 0; i < num_read / sizeof(*dst); ++i) {
         dst[i] *= volumeMultiplier;
     }
-    if (data->ctx->audio_info.finished_reading && data->ctx->audio_info.total_frames <= data->ctx->audio_info.offset / stride){
+    if (data->ctx->audio_info.finished_reading &&
+        data->ctx->audio_info.total_frames <= data->audio_buf->offset / data->ctx->audio_info.channels) {
         Action a = {.type = ACTION_TRACK_OVER};
         a.position = 1;
         write(data->ctx->action_fd[1], &a, sizeof(a));
@@ -89,7 +112,7 @@ static const struct pw_stream_events stream_events = {
 
 Data data = {0,};
 
-void init(struct smp_context *ctx, struct evbuffer *audio_buf) {
+void init(struct smp_context *ctx, struct buffer *audio_buf) {
     pw_init(NULL, NULL);
     data.ctx = ctx;
     data.audio_buf = audio_buf;
@@ -115,19 +138,19 @@ int stop() {
     pw_stream_destroy(data.stream);
     pw_thread_loop_destroy(data.loop);
 
-    evbuffer_drain(data.audio_buf, -1);
+    data.audio_buf->offset = 0;
+    data.audio_buf->len = 0;
 
     started = false;
     return 0;
 }
 
 int start(struct audio_info *info, struct audio_info *previous) {
-    previous->offset = 0;
-    info->offset = 0;
     if (started && previous && previous->channels == info->channels &&
         previous->sample_rate == info->sample_rate) {
         printf("[audio] Using same audio stream\n");
-        evbuffer_drain(data.audio_buf, -1);
+        data.audio_buf->offset = 0;
+        data.audio_buf->len = 0;
         return play();
     }
     printf("[audio] Starting audio new stream\n");
@@ -175,11 +198,13 @@ int start(struct audio_info *info, struct audio_info *previous) {
 int clean_audio() {
     stop();
     pw_deinit();
-    evbuffer_free(data.audio_buf);
+    free(data.audio_buf->buf);
+    memset(data.audio_buf, 0, sizeof(*data.audio_buf));
     return 0;
 }
 
-int set_pcm_stream(FILE *fp){};
-int set_file(const char *filename){};
+int set_pcm_stream(FILE *fp) {};
+
+int set_file(const char *filename) {};
 
 #endif

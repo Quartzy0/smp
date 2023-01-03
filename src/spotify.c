@@ -597,7 +597,7 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
 }
 
 int
-read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct evbuffer *buf) {
+read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf) {
     struct connection *conn = spotify_connect(spotify);
     if (!conn) return -1;
 
@@ -627,7 +627,7 @@ read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], 
 }
 
 int
-read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct evbuffer *buf) {
+read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf) {
     char *path = NULL;
     track_filepath_id(id, &path);
     FILE *fp = fopen(path, "r");
@@ -644,7 +644,7 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
 }
 
 int
-play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct evbuffer *buf) {
+play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf) {
     if (!spotify || !id || !buf) return 1;
     memset(&spotify->decode_ctx, 0, sizeof(spotify->decode_ctx));
     if (read_local_track(spotify, id, buf))

@@ -21,7 +21,7 @@ size_t next_track_count = 0;
 
 void
 tracks_loaded_cb(struct spotify_state *spotify, Track *tracks) {
-    play_track(spotify, tracks[track_index].spotify_id, spotify->smp_ctx->audio_buf);
+    play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf);
 }
 
 void
@@ -95,7 +95,7 @@ handle_action(int fd, short what, void *arg) {
                 if (track_index + a.position >= track_count || track_index + a.position < 0) {
                     if (loop_mode == LOOP_MODE_PLAYLIST) {
                         track_index = 0;
-                        play_track(ctx->spotify, tracks[track_index].spotify_id, ctx->audio_buf);
+                        play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf);
                         break;
                     }
                     //Continue playing recommendations
@@ -106,7 +106,7 @@ handle_action(int fd, short what, void *arg) {
                     track_index += a.position;
                 }
             }
-            play_track(ctx->spotify, tracks[track_index].spotify_id, ctx->audio_buf);
+            play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf);
             break;
         }
         case ACTION_POSITION_ABSOLUTE: {
@@ -132,7 +132,7 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
         case ACTION_SET_POSITION: {
-            int64_t seek_new = -(((int64_t) (ctx->audio_info.offset / ctx->audio_info.sample_rate) * 1000000) -
+            int64_t seek_new = -(((int64_t) (ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000) -
                                  a.position);
             if ((int64_t) seek_new > (int64_t) (frames / ctx->audio_info.sample_rate) * 1000000)
                 break; // TODO: 'frames' no longer exists
@@ -168,9 +168,10 @@ int main(int argc, char **argv) {
 
 //    volume = initial_volume;
     volume = 0.05;
-    struct evbuffer *audio_buf = evbuffer_new();
-    ctx.audio_buf = audio_buf;
-    init(&ctx, audio_buf);
+    memset(&ctx.audio_buf, 0, sizeof(ctx.audio_buf));
+    ctx.audio_buf.buf = calloc(12000000, sizeof(*ctx.audio_buf.buf));
+    ctx.audio_buf.size = 12000000;
+    init(&ctx, &ctx.audio_buf);
 
     pipe(ctx.action_fd);
 

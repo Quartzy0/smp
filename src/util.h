@@ -57,13 +57,17 @@ struct ArtistQuantity {
 struct smp_context{
     struct event_base *base;
     int action_fd[2];
-    struct evbuffer *audio_buf;
+    struct buffer{
+        float *buf;
+        size_t size;
+        size_t len;
+        size_t offset;
+    } audio_buf;
     struct spotify_state *spotify;
     struct audio_info{
         double volume;
         size_t sample_rate;
         size_t bitrate;
-        size_t offset;
         size_t total_frames;
         int channels;
         bool finished_reading;
@@ -132,7 +136,7 @@ void rek_mkdir(const char *path);
 FILE *fopen_mkdir(const char *path, char *mode);
 
 int
-decode_vorbis(struct evbuffer *in, struct evbuffer *buf_out, struct decode_context *ctx, size_t *progress,
+decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context *ctx, size_t *progress,
               struct audio_info *info, struct audio_info *previous, audio_info_cb cb);
 
 void
