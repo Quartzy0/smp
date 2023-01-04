@@ -132,12 +132,13 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
         case ACTION_SET_POSITION: {
-            int64_t seek_new = -(((int64_t) (ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000) -
-                                 a.position);
-            if ((int64_t) seek_new > (int64_t) (frames / ctx->audio_info.sample_rate) * 1000000)
-                break; // TODO: 'frames' no longer exists
-            seek = seek_new;
-            printf("[ctrl] Set position to: %ld\n", seek);
+            if (ctx->audio_info.finished_reading &&
+                (a.position > (int64_t) (ctx->audio_info.total_frames / ctx->audio_info.sample_rate) * 1000000 ||
+                 a.position < 0))
+                break;
+            seek = -((int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0) -
+                     a.position);
+            printf("[ctrl] Set position to: %ld (seek: %ld)\n", a.position, seek);
             break;
         }
         case ACTION_NONE: {

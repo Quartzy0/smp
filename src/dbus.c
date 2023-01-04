@@ -284,7 +284,7 @@ void get_mediaplayer_player(DBusMessage *msg, char *property, struct smp_context
         dbus_message_iter_append_basic(&var, DBUS_TYPE_DOUBLE, &volume);
     } else if (!strcmp(property, "Position") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "x", &var);
-        int64_t position = ((int64_t) ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000; //Convert to micoseconds
+        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0); //Convert to micoseconds
         dbus_message_iter_append_basic(&var, DBUS_TYPE_INT64, &position);
     } else if (!strcmp(property, "Metadata") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "a{sv}", &var);
@@ -497,7 +497,7 @@ void getall_mediaplayer_player(DBusMessage *msg, struct smp_context *ctx) {
 
     //Metadata
     if (started) {
-        int64_t position = ((int64_t) ctx->audio_buf.offset / ctx->audio_info.sample_rate) * 1000000; //Convert to micoseconds
+        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0); //Convert to micoseconds
         add_dict_entry_p(&dict, "Position", &position, DBUS_TYPE_INT64);
         DBusMessageIter dict_entry, dict_val;
         // Create our entry in the dictionary

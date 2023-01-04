@@ -19,7 +19,6 @@ int status;
 bool started;
 double volume;
 int64_t seek;
-size_t frames;
 
 typedef struct Data {
     struct pw_thread_loop *loop;

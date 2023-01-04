@@ -12,7 +12,6 @@ extern int status;
 extern bool started;
 extern double volume;
 extern int64_t seek;
-extern size_t frames;
 
 #define FRAMES_PER_BUFFER   (512)
 
