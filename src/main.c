@@ -21,7 +21,10 @@ size_t next_track_count = 0;
 
 void
 tracks_loaded_cb(struct spotify_state *spotify, Track *tracks) {
-    play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf);
+    printf("[ctrl] Track list loaded\n");
+    if(play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf)){
+        fprintf(stderr, "[ctrl] Error when trying to play track\n");
+    }
 }
 
 void
@@ -95,18 +98,23 @@ handle_action(int fd, short what, void *arg) {
                 if (track_index + a.position >= track_count || track_index + a.position < 0) {
                     if (loop_mode == LOOP_MODE_PLAYLIST) {
                         track_index = 0;
-                        play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf);
+                        if(play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)){
+                            fprintf(stderr, "[ctrl] Error when trying to play track\n");
+                        }
                         break;
                     }
                     //Continue playing recommendations
-                    add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count, tracks_loaded_cb);
+                    add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count,
+                                                    tracks_loaded_cb);
                     track_index++;
                     break;
                 } else {
                     track_index += a.position;
                 }
             }
-            play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf);
+            if(play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)){
+                fprintf(stderr, "[ctrl] Error when trying to play track\n");
+            }
             break;
         }
         case ACTION_POSITION_ABSOLUTE: {
@@ -136,7 +144,8 @@ handle_action(int fd, short what, void *arg) {
                 (a.position > (int64_t) (ctx->audio_info.total_frames / ctx->audio_info.sample_rate) * 1000000 ||
                  a.position < 0))
                 break;
-            seek = -((int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0) -
+            seek = -((int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) *
+                                1000000.0) -
                      a.position);
             printf("[ctrl] Set position to: %ld (seek: %ld)\n", a.position, seek);
             break;
@@ -176,8 +185,14 @@ int main(int argc, char **argv) {
 
     pipe(ctx.action_fd);
 
-    struct event *fd_event = event_new(ctx.base, ctx.action_fd[0], EV_READ | EV_PERSIST, handle_action, &ctx);
-    event_add(fd_event, NULL);
+    ctx.action_event = event_new(ctx.base, ctx.action_fd[0], EV_READ | EV_PERSIST, handle_action, &ctx);
+    if (!ctx.action_event){
+        fprintf(stderr, "[ctrl] Error when creating action event\n");
+        close(ctx.action_fd[0]);
+        close(ctx.action_fd[1]);
+        return 1;
+    }
+    event_add(ctx.action_event, NULL);
 
     pthread_t dbus_thread = 0;
     int err = pthread_create(&dbus_thread, NULL, &init_dbus, &ctx);
@@ -196,13 +211,15 @@ int main(int argc, char **argv) {
     clean_audio();
     cleanup();
     clean_config();
-    if (fd_event) event_free(fd_event);
+    if (ctx.action_event) event_free(ctx.action_event);
     event_base_free(ctx.base);
     clean_vorbis_decode(&ctx.spotify->decode_ctx);
     for (int i = 0; i < sizeof(ctx.spotify->connections) / sizeof(*ctx.spotify->connections); ++i) {
         free(ctx.spotify->connections[i].cache_path);
     }
     clear_tracks(tracks, &track_count, &track_size);
+    close(ctx.action_fd[0]);
+    close(ctx.action_fd[1]);
 
     return EXIT_SUCCESS;
 }

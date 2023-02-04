@@ -56,6 +56,7 @@ struct ArtistQuantity {
 
 struct smp_context{
     struct event_base *base;
+    struct event *action_event;
     int action_fd[2];
     struct buffer{
         float *buf;

@@ -5,7 +5,6 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <ctype.h>
-#include <unistd.h>
 #include "spotify.h"
 
 LoopMode loop_mode = LOOP_MODE_NONE;
@@ -266,8 +265,6 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                         } else {
                             /* we have a packet.  Decode it */
                             float **pcm;
-                            /*float *pcmi = NULL;
-                            size_t pcmi_len = 0;*/
                             int samples;
 
                             if (vorbis_synthesis(&ctx->vb, &ctx->op) == 0) /* test for success! */
@@ -280,30 +277,15 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                             (-1.<=range<=1.) to whatever PCM format and write it out */
 
                             while ((samples = vorbis_synthesis_pcmout(&ctx->vd, &pcm)) > 0) {
-
-                            /*if (!pcmi) {
-                                pcmi = calloc(samples * ctx->vi.channels, sizeof(*pcmi));
-                                pcmi_len = samples * ctx->vi.channels;
-                            }
-                            if (pcmi_len < samples * ctx->vi.channels) {
-                                float *tmp = realloc(pcmi, samples * ctx->vi.channels * sizeof(*tmp));
-                                if (!tmp) {
-                                    fprintf(stderr, "realloc error");
-                                    exit(1);
-                                }
-                                pcmi = tmp;
-                                pcmi_len = samples * ctx->vi.channels;
-                            }*/
                                 if (buf_out->size < buf_out->len+samples*ctx->vi.channels){
-                                    float *tmp = realloc(buf_out->buf, (buf_out->size+(samples*ctx->vi.channels)*2)*sizeof(*tmp));
+                                    float *tmp = realloc(buf_out->buf, (buf_out->size*2)*sizeof(*tmp));
                                     if (!tmp) perror("error when reallocating audio buffer");
                                     buf_out->buf = tmp;
-                                    buf_out->size = buf_out->size+(samples*ctx->vi.channels)*2;
+                                    buf_out->size = buf_out->size*2;
                                 }
                                 for (int i = 0; i < samples; ++i) {
                                     for (int j = 0; j < ctx->vi.channels; ++j) {
                                         buf_out->buf[buf_out->len + i*ctx->vi.channels + j] = pcm[j][i];
-//                                        pcmi[i*ctx->vi.channels+j] = pcm[j][i];
                                     }
                                 }
 
@@ -316,7 +298,6 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                                                       many samples we
                                                       actually consumed */
                             }
-//                            free(pcmi);
                         }
                     }
                     if (ogg_page_eos(&ctx->og))goto eos;

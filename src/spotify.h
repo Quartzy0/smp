@@ -149,10 +149,6 @@ void free_playlist(PlaylistInfo *playlist);
 
 void download_track(Track *track, bool block, FILE **pcm);
 
-void track_filepath(Track *track, char **out);
-
-void playlist_filepath(char *id, char **out, bool album);
-
 void save_playlist_to_file(const char *path, PlaylistInfo *playlist, Track *tracks);
 
 void save_playlist_last_played_to_file(const char *path, PlaylistInfo *playlist);

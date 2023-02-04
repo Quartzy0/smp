@@ -301,19 +301,10 @@ cleanup() {
 }
 
 void
-track_filepath(Track *track, char **out) {
-    (*out) = malloc((track_save_path_len + SPOTIFY_ID_LEN + 4 + 1) * sizeof(char));
-    snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%s.ogg", track_save_path,
-             track->spotify_id);
-    out[track_save_path_len + SPOTIFY_ID_LEN + 4] = 0;
-}
-
-void
 track_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((track_save_path_len + SPOTIFY_ID_LEN + 4 + 1) * sizeof(char));
     snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%s.ogg", track_save_path,
              id);
-    out[track_save_path_len + SPOTIFY_ID_LEN + 4] = 0;
 }
 
 void
@@ -321,7 +312,6 @@ track_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((track_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
     snprintf((*out), track_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", track_info_path,
              id);
-    out[track_info_path_len + SPOTIFY_ID_LEN + 5] = 0;
 }
 
 void
@@ -329,7 +319,6 @@ album_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((album_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
     snprintf((*out), album_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", album_info_path,
              id);
-    out[album_info_path_len + SPOTIFY_ID_LEN + 5] = 0;
 }
 
 void
@@ -337,7 +326,6 @@ playlist_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
     snprintf((*out), playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", playlist_info_path,
              id);
-    out[playlist_info_path_len + SPOTIFY_ID_LEN + 5] = 0;
 }
 
 size_t
@@ -570,7 +558,10 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         conn->expecting = 0;
         conn->busy = true;
         conn->spotify = spotify;
-        conn->cache_path = NULL;
+        if (conn->cache_path) {
+            free(conn->cache_path);
+            conn->cache_path = NULL;
+        }
         conn->cb = generic_proxy_cb;
         conn->cb_arg = &conn->params;
 
@@ -615,7 +606,7 @@ read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], 
         conn->cb = NULL;
         conn->cb_arg = NULL;
     }
-    if (!conn->cache_path) {
+    if (conn->cache_path) {
         free(conn->cache_path);
         conn->cache_path = NULL;
     }
@@ -640,6 +631,7 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
                          &spotify->smp_ctx->previous,
                          (audio_info_cb) start)) {}
     evbuffer_free(file_buf);
+    printf("[spotify] Finished decoding the audio data\n");
     return 0;
 }
 

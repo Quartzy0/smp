@@ -31,7 +31,6 @@ static void on_process(void *userdata) {
     Data *data = userdata;
     struct pw_buffer *b;
     struct spa_buffer *buf;
-    unsigned int i, stride;
     float *dst;
 
     if (!data->audio_buf->len || !data->ctx->audio_info.channels || (data->ctx->audio_info.finished_reading &&
@@ -77,8 +76,6 @@ static void on_process(void *userdata) {
         nozero:;
     }
 
-    stride = sizeof(*dst) * data->ctx->audio_info.channels;
-
     size_t num_read =
             buf->datas[0].maxsize < (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf)
             ? buf->datas[0].maxsize : (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf);
@@ -86,7 +83,7 @@ static void on_process(void *userdata) {
     data->audio_buf->offset += num_read / sizeof(*data->audio_buf->buf);
     const double volumeDb = -6.0;
     const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
-    for (i = 0; i < num_read / sizeof(*dst); ++i) {
+    for (uint32_t i = 0; i < num_read / sizeof(*dst); ++i) {
         dst[i] *= volumeMultiplier;
     }
     if (data->ctx->audio_info.finished_reading &&
@@ -98,7 +95,7 @@ static void on_process(void *userdata) {
 
     finish:
     buf->datas[0].chunk->offset = 0;
-    buf->datas[0].chunk->stride = (int) stride;
+    buf->datas[0].chunk->stride = (int) sizeof(*dst) * data->ctx->audio_info.channels;
     buf->datas[0].chunk->size = buf->datas[0].maxsize;
 
     pw_stream_queue_buffer(data->stream, b);
@@ -111,10 +108,11 @@ static const struct pw_stream_events stream_events = {
 
 Data data = {0,};
 
-void init(struct smp_context *ctx, struct buffer *audio_buf) {
+int init(struct smp_context *ctx, struct buffer *audio_buf) {
     pw_init(NULL, NULL);
     data.ctx = ctx;
     data.audio_buf = audio_buf;
+    return 0;
 }
 
 int pause() {
@@ -201,9 +199,5 @@ int clean_audio() {
     memset(data.audio_buf, 0, sizeof(*data.audio_buf));
     return 0;
 }
-
-int set_pcm_stream(FILE *fp) {};
-
-int set_file(const char *filename) {};
 
 #endif

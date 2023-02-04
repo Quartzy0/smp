@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include "util.h"
 
 extern int status;
 extern bool started;
@@ -15,11 +16,7 @@ extern int64_t seek;
 
 #define FRAMES_PER_BUFFER   (512)
 
-void init(struct smp_context *ctx, struct evbuffer *audio_buf);
-
-int set_file(const char *filename);
-
-int set_pcm_stream(FILE *fp);
+int init(struct smp_context *ctx, struct buffer *audio_buf);
 
 int start(struct audio_info *info, struct audio_info *previous);
 
