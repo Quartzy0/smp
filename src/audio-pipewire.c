@@ -35,8 +35,7 @@ static void on_process(void *userdata) {
 
     if (!data->audio_buf->len || !data->ctx->audio_info.channels || (data->ctx->audio_info.finished_reading &&
                                                                      data->ctx->audio_info.total_frames <=
-                                                                     data->audio_buf->offset /
-                                                                     data->ctx->audio_info.channels))
+                                                                     data->audio_buf->offset))
         return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
@@ -55,7 +54,7 @@ static void on_process(void *userdata) {
             data->ctx->audio_buf.offset = -seek_offset > data->ctx->audio_buf.offset ? 0 : data->ctx->audio_buf.offset+seek_offset;
         }else if (data->ctx->audio_info.finished_reading){
             data->ctx->audio_buf.offset += seek_offset;
-            if (data->ctx->audio_buf.offset >= data->ctx->audio_buf.len){
+            if (data->ctx->audio_buf.offset >= data->ctx->audio_info.total_frames){
                 Action a = {.type = ACTION_TRACK_OVER};
                 a.position = 1;
                 write(data->ctx->action_fd[1], &a, sizeof(a));
@@ -63,7 +62,7 @@ static void on_process(void *userdata) {
                 goto finish;
             }
         }else{
-            int64_t possible_seek = data->ctx->audio_buf.len-data->ctx->audio_buf.offset;
+            int64_t possible_seek = data->ctx->audio_info.total_frames-data->ctx->audio_buf.offset;
             if (possible_seek < seek_offset){
                 data->ctx->audio_buf.offset += possible_seek;
                 seek = (int64_t) ((double) ((seek_offset-possible_seek) / (double) data->ctx->audio_info.sample_rate) / 0.000001);
@@ -76,18 +75,20 @@ static void on_process(void *userdata) {
         nozero:;
     }
 
+    size_t max_frames = (buf->datas[0].maxsize / sizeof(*data->audio_buf->buf)) / data->ctx->audio_info.channels;
     size_t num_read =
-            buf->datas[0].maxsize < (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf)
-            ? buf->datas[0].maxsize : (data->audio_buf->len - data->audio_buf->offset) * sizeof(*data->audio_buf->buf);
-    memcpy(dst, &data->audio_buf->buf[data->audio_buf->offset], num_read);
-    data->audio_buf->offset += num_read / sizeof(*data->audio_buf->buf);
+            max_frames < (data->ctx->audio_info.total_frames - data->audio_buf->offset)
+            ? max_frames : (data->ctx->audio_info.total_frames - data->audio_buf->offset);
+    num_read *= data->ctx->audio_info.channels;
+    memcpy(dst, &data->audio_buf->buf[data->audio_buf->offset*data->ctx->audio_info.channels], num_read * sizeof(*data->audio_buf->buf));
+    data->audio_buf->offset += num_read / data->ctx->audio_info.channels;
     const double volumeDb = -6.0;
     const float volumeMultiplier = (float) (volume * pow(10.0, (volumeDb / 20.0)));
-    for (uint32_t i = 0; i < num_read / sizeof(*dst); ++i) {
+    for (uint32_t i = 0; i < num_read; ++i) {
         dst[i] *= volumeMultiplier;
     }
     if (data->ctx->audio_info.finished_reading &&
-        data->ctx->audio_info.total_frames <= data->audio_buf->offset / data->ctx->audio_info.channels) {
+        data->ctx->audio_info.total_frames <= data->audio_buf->offset) {
         Action a = {.type = ACTION_TRACK_OVER};
         a.position = 1;
         write(data->ctx->action_fd[1], &a, sizeof(a));

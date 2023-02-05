@@ -135,11 +135,13 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
         case ACTION_SEEK: {
+            if (!started) break;
             seek = a.position;
             printf("[ctrl] Seek to: %ld\n", seek);
             break;
         }
         case ACTION_SET_POSITION: {
+            if (!started) break;
             if (ctx->audio_info.finished_reading &&
                 (a.position > (int64_t) (ctx->audio_info.total_frames / ctx->audio_info.sample_rate) * 1000000 ||
                  a.position < 0))
