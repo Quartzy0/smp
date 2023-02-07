@@ -412,6 +412,7 @@ get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *countOut) {
 static const char *err_c[] = {
         ERROR_ENTRY(ET_NO_ERROR),
         ERROR_ENTRY(ET_SPOTIFY),
+        ERROR_ENTRY(ET_SPOTIFY_INTERNAL),
         ERROR_ENTRY(ET_HTTP),
         ERROR_ENTRY(ET_FULL),
 };
@@ -438,6 +439,23 @@ spotify_connect(struct spotify_state *spotify) {
         return NULL;
     }
     return &spotify->connections[i];
+}
+
+void
+spotify_reconnect(struct connection *conn) {
+    printf("[spotify] Recreating spotify connection\n");
+    struct spotify_state *spotify = conn->spotify;
+
+    bufferevent_free(conn->bev);
+
+    char *inst = random_backend_instance;
+    printf("[spotify] Creating new connection to %s\n", inst);
+    conn->bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_enable(conn->bev, EV_READ | EV_WRITE);
+    if (bufferevent_socket_connect_hostname(conn->bev, NULL, AF_UNSPEC, inst,
+                                            SPOTIFY_PORT) != 0) {
+        bufferevent_free(conn->bev);
+    }
 }
 
 void
@@ -468,7 +486,14 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
                     conn->error_buffer);
             free(conn->error_buffer);
             conn->error_buffer = NULL;
-            conn->busy = false;
+            if (conn->error_type == ET_SPOTIFY || conn->retries >= 3){
+                conn->busy = false;
+                return; // ET_SPOTIFY means an error with the query (invalid track id, etc.) so reconnecting won't help
+            }
+            spotify_reconnect(conn);
+            conn->retries++;
+            if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return;
+            bufferevent_setcb(conn->bev, generic_read_cb, NULL, NULL, conn);
         }
     } else {
         if (conn->cache_fp) {
@@ -480,6 +505,7 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
             conn->busy = false;
             if (conn->cache_fp) fclose(conn->cache_fp);
             free(conn->cache_path);
+            free(conn->payload);
             conn->cache_path = NULL;
             conn->cache_fp = NULL;
         }
@@ -565,6 +591,11 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         conn->cb = generic_proxy_cb;
         conn->cb_arg = &conn->params;
 
+        conn->payload = malloc(payload_len);
+        memcpy(conn->payload, payload,
+               payload_len); // Payload copied in case of error when the request has to be resent
+        conn->payload_len = payload_len;
+
         if (bufferevent_write(conn->bev, payload, payload_len) != 0) return -1;
         bufferevent_setcb(conn->bev, generic_read_cb, NULL, NULL, conn);
     };
@@ -592,9 +623,11 @@ read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], 
     struct connection *conn = spotify_connect(spotify);
     if (!conn) return -1;
 
-    char data[23];
-    data[0] = MUSIC_DATA;
-    memcpy(&data[1], id, sizeof(data) - 1);
+    conn->payload = malloc(23);
+    conn->payload_len = 23;
+    conn->payload[0] = MUSIC_DATA;
+    memcpy(&conn->payload[1], id, 22); // Payload stored for later in case of error if it has to be resent
+
     conn->progress = 0;
     conn->expecting = 0;
     conn->busy = true;
@@ -612,7 +645,7 @@ read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], 
     }
     track_filepath_id(id, &conn->cache_path);
 
-    if (bufferevent_write(conn->bev, data, sizeof(data)) != 0) return -1;
+    if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return -1;
     bufferevent_setcb(conn->bev, generic_read_cb, NULL, NULL, conn);
     return 0;
 }

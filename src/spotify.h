@@ -60,10 +60,11 @@ enum spotify_packet_type {
 };
 
 enum error_type {
-    ET_NO_ERROR,
-    ET_SPOTIFY,
-    ET_HTTP,
-    ET_FULL
+    ET_NO_ERROR = 0,
+    ET_SPOTIFY = 1,
+    ET_SPOTIFY_INTERNAL = 2,
+    ET_HTTP = 3,
+    ET_FULL = 4
 };
 struct connection;
 
@@ -98,6 +99,10 @@ struct spotify_state {
 
         char *error_buffer;
         enum error_type error_type;
+
+        char *payload;
+        size_t payload_len;
+        int retries;
     } connections[CONNECTION_POOL_MAX];
     size_t connections_len;
     struct event_base *base;
