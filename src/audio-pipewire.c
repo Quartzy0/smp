@@ -144,11 +144,11 @@ int stop() {
 }
 
 int start(struct audio_info *info, struct audio_info *previous) {
+    data.audio_buf->offset = 0;
+    data.audio_buf->len = 0;
     if (started && previous && previous->channels == info->channels &&
         previous->sample_rate == info->sample_rate) {
         printf("[audio] Using same audio stream\n");
-        data.audio_buf->offset = 0;
-        data.audio_buf->len = 0;
         return play();
     }
     printf("[audio] Starting audio new stream\n");

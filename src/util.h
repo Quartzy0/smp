@@ -97,6 +97,7 @@ struct decode_context{
     vorbis_block vb; /* local working space for packet->PCM decode */
     int p;
     int zero_count;
+    bool cb_called;
 };
 
 typedef void(*audio_info_cb)(struct audio_info *info, struct audio_info *previous);

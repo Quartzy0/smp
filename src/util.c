@@ -178,6 +178,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
             ogg_sync_init(&ctx->oy);
             ctx->state = HEADERS;
             ctx->p = 0;
+            ctx->cb_called = false;
         }
         case HEADERS: {
             size_t buf_len = evbuffer_get_length(in);
@@ -206,12 +207,12 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                         /* Uh oh; data at some point was corrupted or missing!
                            We can't tolerate that in a header.  Die. */
                         fprintf(stderr, "Corrupt secondary header.  Exiting.\n");
-                        exit(1);
+                        return -1;
                     }
                     result = vorbis_synthesis_headerin(&ctx->vi, &ctx->vc, &ctx->op);
                     if (result < 0) {
                         fprintf(stderr, "Corrupt secondary header.  Exiting.\n");
-                        exit(1);
+                        return -1;
                     }
                     ctx->p++;
                 }
@@ -222,10 +223,13 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                     info->channels = ctx->vi.channels;
                     info->finished_reading = false;
                     info->total_frames = 0;
-                    if (cb) cb(info, previous);
+                    if (cb){
+                        cb(info, previous);
+                        ctx->cb_called = true;
+                    }
                     if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
                         fprintf(stderr, "Error: Corrupt header during playback initialization.\n");
-                        exit(1);
+                        return -1;
                     }
                     vorbis_block_init(&ctx->vd, &ctx->vb);
                     ctx->state = DECODE;
@@ -246,13 +250,15 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
             *progress += bytes;
             ogg_sync_wrote(&ctx->oy, bytes);
 
-            decode_no_read:
+            decode_no_read:;
+            int fails = 0;
             while (1) {
                 int result = ogg_sync_pageout(&ctx->oy, &ctx->og);
                 if (result == 0)break; /* need more data */
                 if (result < 0) { /* missing or corrupt data at this page position */
                     fprintf(stderr, "Corrupt or missing data in bitstream; "
                                     "continuing...\n");
+                    fails++;
                 } else {
                     ogg_stream_pagein(&ctx->os, &ctx->og); /* can safely ignore errors at
                                            this point */
@@ -308,7 +314,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
             if (ctx->zero_count >= 5) {
                 goto eos; // Assume stream has ended if received 0 bytes more than 5 times in a row.
             }
-            return 1;
+            return 1 + fails;
             eos:
             ctx->state = EOS;
             info->finished_reading = true;

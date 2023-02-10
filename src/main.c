@@ -178,8 +178,7 @@ int main(int argc, char **argv) {
     state.base = ctx.base;
     state.smp_ctx = &ctx;
 
-//    volume = initial_volume;
-    volume = 0.05;
+    volume = initial_volume;
     memset(&ctx.audio_buf, 0, sizeof(ctx.audio_buf));
     ctx.audio_buf.buf = calloc(12000000, sizeof(*ctx.audio_buf.buf));
     ctx.audio_buf.size = 12000000;
