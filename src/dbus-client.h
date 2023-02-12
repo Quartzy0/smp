@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "util.h"
+#include "spotify.h"
 
 typedef enum PlaybackStatus{
     PBS_PLAYING,
@@ -96,6 +97,10 @@ void dbus_client_call_method(const char *iface, const char *method);
 void dbus_client_set_property(const char *iface, const char *name, int type, void *value);
 
 int dbus_client_get_property(const char *iface, const char *name, int type, void *value);
+
+int dbus_client_search(bool tracks, bool albums, bool artists, bool playlists, char *query, Track **tracksOut,
+                   size_t *tracks_len, PlaylistInfo **albumsOut, size_t *albums_len, Artist **artistsOut,
+                   size_t *artists_len, PlaylistInfo **playlistsOut, size_t *playlists_len);
 
 void print_properties(FILE *stream, PlayerProperties *properties);
 

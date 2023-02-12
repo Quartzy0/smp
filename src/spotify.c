@@ -16,14 +16,17 @@
 #include "config.h"
 #include "audio.h"
 
+struct json_track_parse_params{
+    Track **tracks;
+    size_t *track_size;
+    size_t *track_len;
+};
+
 int
 parse_playlist_info(const char *data, size_t len, PlaylistInfo *playlist);
 
 void
 generic_read_cb(struct bufferevent *bev, void *arg);
-
-int search(const char *query, Track **tracks, size_t *tracks_count, PlaylistInfo **playlists, size_t *playlist_count,
-           PlaylistInfo **albums, size_t *album_count){exit(222);}
 
 void
 free_tracks(Track *track, size_t count) {
@@ -76,6 +79,11 @@ free_playlist(PlaylistInfo *playlist) {
     free(playlist->name);
     free(playlist->image_url);
     memset(playlist, 0, sizeof(*playlist));
+}
+
+void
+free_artist(Artist *artist){
+    free(artist->name);
 }
 
 void
@@ -351,8 +359,8 @@ generic_proxy_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
             params->path = NULL;
         }
 
-        params->func(buf, conn->progress, params->tracks, params->track_size, params->track_len);
-        if (params->func1) params->func1(conn->spotify, *(params->tracks));
+        params->func(buf, conn->progress, params->func_userp);
+        if (params->func1) params->func1(conn->spotify, params->func_userp);
         printf("[spotify] Parsed JSON info\n");
         conn->busy = false;
     }
@@ -360,8 +368,7 @@ generic_proxy_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
 
 int
 make_and_parse_generic_request(struct spotify_state *spotify, char *payload, size_t payload_len, char *cache_path,
-                               json_parse_func func, info_received_cb func1, Track **tracks, size_t *track_size,
-                               size_t *track_len) {
+                               json_parse_func func, info_received_cb func1, void *userp) {
     //Try to read from file
     if (cache_path) {
         FILE *fp = fopen(cache_path, "r");
@@ -375,8 +382,8 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         if (read != file_len) goto remote;
         file_buf[file_len] = 0;
         int ret;
-        if ((ret = func(file_buf, file_len + 1, tracks, track_size, track_len)) != 0) return ret;
-        if (func1) func1(spotify, *tracks);
+        if ((ret = func(file_buf, file_len + 1, userp)) != 0) return ret;
+        if (func1) func1(spotify, userp);
         return ret;
     }
     //Make request and download data otherwise
@@ -391,9 +398,7 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         }else {
             conn->params.path = NULL;
         }
-        conn->params.track_size = track_size;
-        conn->params.track_len = track_len;
-        conn->params.tracks = tracks;
+        conn->params.func_userp = userp;
         conn->params.func = func;
         conn->params.func1 = func1;
 
@@ -524,7 +529,64 @@ ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]) {
 }
 
 int
-parse_track_json(const char *data, size_t len, Track **tracks, size_t *track_size, size_t *track_len) {
+parse_track_cjson(cJSON *track_json, Track *track){
+    char *id = cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "id"));
+    if (cJSON_IsTrue(cJSON_GetObjectItem(track_json, "is_local"))) {
+        fprintf(stderr, "[spotify] Local spotify tracks cannot be downloaded. (ID: %s)\n", id);
+        cJSON_Delete(track_json);
+        return 1;
+    }
+
+    track->playlist = NULL;
+    memcpy(track->spotify_id, id, SPOTIFY_ID_LEN_NULL);
+    track->spotify_name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "name")));
+    sanitize(&track->spotify_name);
+    track->spotify_name_escaped = urlencode(track->spotify_name);
+    memcpy(track->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "uri")), SPOTIFY_URI_LEN_NULL);
+    track->spotify_album_art = strdup(cJSON_GetStringValue(
+            cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(track_json, "album"), "images"),
+                                                   0), "url")));
+    track->download_state = DS_NOT_DOWNLOADED;
+    track->duration_ms = cJSON_GetObjectItem(track_json, "duration_ms")->valueint;
+
+    cJSON *artist = cJSON_GetArrayItem(cJSON_GetObjectItem(track_json, "artists"), 0);
+    track->artist = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(artist, "name")));
+
+    memcpy(track->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
+    sanitize(&track->artist);
+    track->artist_escaped = urlencode(track->artist);
+    return 0;
+}
+
+void
+parse_playlist_info_cjson(cJSON *root, PlaylistInfo *playlist){
+    playlist->not_empty = true;
+    playlist->album = cJSON_HasObjectItem(root, "album_type");
+    playlist->name = strdup(cJSON_GetObjectItem(root, "name")->valuestring);
+    memcpy(playlist->spotify_id, cJSON_GetObjectItem(root, "id")->valuestring, 23);
+    playlist->image_url = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "images"), 0),
+                                                     "url")->valuestring);
+    if (playlist->album) {
+        playlist->track_count = cJSON_GetObjectItem(root, "total_tracks")->valueint;
+    } else {
+        playlist->track_count = cJSON_GetArraySize(cJSON_GetObjectItem(root, "tracks"));
+    }
+}
+
+void
+parse_artist_cjson(cJSON *root, Artist *artist){
+    artist->name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(root, "name")));
+    memcpy(artist->spotify_id, cJSON_GetObjectItem(root, "id")->valuestring, 23);
+    artist->followers = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "followers"), "total")->valueint;
+}
+
+int
+parse_track_json(const char *data, size_t len, void *userp) {
+    struct json_track_parse_params *params = (struct json_track_parse_params*)userp;
+    struct Track **tracks = params->tracks;
+    size_t *track_size = params->track_size;
+    size_t *track_len = params->track_len;
+
     cJSON *root = cJSON_ParseWithLength(data, len);
 
     if (!root) {
@@ -538,12 +600,6 @@ parse_track_json(const char *data, size_t len, Track **tracks, size_t *track_siz
         fprintf(stderr, "[spotify] Error occurred when trying to get track info (%d): %s\n", response_status,
                 cJSON_GetStringValue(
                         cJSON_GetObjectItem(err, "message")));
-        cJSON_Delete(root);
-        return 1;
-    }
-    char *id = cJSON_GetStringValue(cJSON_GetObjectItem(root, "id"));
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "is_local"))) {
-        fprintf(stderr, "[spotify] Local spotify tracks cannot be downloaded. (ID: %s)\n", id);
         cJSON_Delete(root);
         return 1;
     }
@@ -563,41 +619,9 @@ parse_track_json(const char *data, size_t len, Track **tracks, size_t *track_siz
     Track *track = &(*tracks)[*track_len];
     *track_len += 1;
 
-    track->playlist = NULL;
-    memcpy(track->spotify_id, id, SPOTIFY_ID_LEN_NULL);
-    track->spotify_name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(root, "name")));
-    sanitize(&track->spotify_name);
-    track->spotify_name_escaped = urlencode(track->spotify_name);
-    memcpy(track->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(root, "uri")), SPOTIFY_URI_LEN_NULL);
-    track->spotify_album_art = strdup(cJSON_GetStringValue(
-            cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "album"), "images"),
-                                                   0), "url")));
-    track->download_state = DS_NOT_DOWNLOADED;
-    track->duration_ms = cJSON_GetObjectItem(root, "duration_ms")->valueint;
-
-    cJSON *artist = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "artists"), 0);
-    track->artist = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(artist, "name")));
-
-    memcpy(track->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
-    sanitize(&track->artist);
-    track->artist_escaped = urlencode(track->artist);
+    if(parse_track_cjson(root, track)) return 1;
 
     cJSON_Delete(root);
-    return 0;
-}
-
-int
-add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
-               size_t *track_len,
-               info_received_cb func) {
-    char payload[SPOTIFY_ID_LEN + 1];
-    payload[0] = MUSIC_INFO;
-    memcpy(&payload[1], id, SPOTIFY_ID_LEN);
-    char *path = NULL;
-    track_info_filepath_id(id, &path);
-    make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_track_json, func, tracks, track_size,
-                                   track_len);
-    free(path);
     return 0;
 }
 
@@ -618,23 +642,17 @@ parse_playlist_info(const char *data, size_t len, PlaylistInfo *playlist) {
         return 1;
     }
 
-    playlist->not_empty = true;
-    playlist->album = cJSON_HasObjectItem(root, "album_type");
-    playlist->name = strdup(cJSON_GetObjectItem(root, "name")->valuestring);
-    memcpy(playlist->spotify_id, cJSON_GetObjectItem(root, "id")->valuestring, 23);
-    playlist->image_url = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "images"), 0),
-                                                     "url")->valuestring);
-    if (playlist->album) {
-        playlist->track_count = cJSON_GetObjectItem(root, "total_tracks")->valueint;
-    } else {
-        playlist->track_count = cJSON_GetArraySize(cJSON_GetObjectItem(root, "tracks"));
-    }
+    parse_playlist_info_cjson(root, playlist);
     cJSON_Delete(root);
     return 0;
 }
 
 int
-parse_album_json(const char *data, size_t len, Track **tracks, size_t *track_size, size_t *track_len) {
+parse_album_json(const char *data, size_t len, void *userp) {
+    struct json_track_parse_params *params = (struct json_track_parse_params*)userp;
+    struct Track **tracks = params->tracks;
+    size_t *track_size = params->track_size;
+    size_t *track_len = params->track_len;
     cJSON *root = cJSON_ParseWithLength(data, len);
 
     if (!root) {
@@ -696,8 +714,11 @@ parse_album_json(const char *data, size_t len, Track **tracks, size_t *track_siz
 }
 
 int
-parse_playlist_json(const char *data, size_t len, Track **tracks, size_t *track_size,
-                    size_t *track_len) {
+parse_playlist_json(const char *data, size_t len, void *userp) {
+    struct json_track_parse_params *params = (struct json_track_parse_params*)userp;
+    struct Track **tracks = params->tracks;
+    size_t *track_size = params->track_size;
+    size_t *track_len = params->track_len;
     cJSON *root = cJSON_ParseWithLength(data, len);
 
     if (cJSON_HasObjectItem(root, "error")) {
@@ -760,8 +781,11 @@ parse_playlist_json(const char *data, size_t len, Track **tracks, size_t *track_
 }
 
 int
-parse_recommendations_json(const char *data, size_t len, Track **tracks, size_t *track_size,
-                           size_t *track_len) {
+parse_recommendations_json(const char *data, size_t len, void *userp) {
+    struct json_track_parse_params *params = (struct json_track_parse_params*)userp;
+    struct Track **tracks = params->tracks;
+    size_t *track_size = params->track_size;
+    size_t *track_len = params->track_len;
     cJSON *root = cJSON_ParseWithLength(data, len);
 
     if (cJSON_HasObjectItem(root, "error")) {
@@ -812,23 +836,129 @@ parse_recommendations_json(const char *data, size_t len, Track **tracks, size_t 
 }
 
 int
+parse_search_json(const char *data, size_t len, void *userp) {
+    struct spotify_search_results *params = (struct spotify_search_results*) userp;
+
+    cJSON *root = cJSON_ParseWithLength(data, len);
+
+    if (cJSON_HasObjectItem(root, "error")) {
+        fprintf(stderr, "[spotify] Error occurred when trying to search: %s\n", cJSON_GetObjectItem(
+                cJSON_GetObjectItem(root, "error"), "message")->valuestring);
+        cJSON_Delete(root);
+        return 1;
+    }
+    cJSON *e;
+    int i;
+
+    // Track parsing
+    if (params->qtracks){
+        cJSON *tracks_obj = cJSON_GetObjectItem(root, "tracks");
+        cJSON *tracks_arr = cJSON_GetObjectItem(tracks_obj, "items");
+        params->track_len = cJSON_GetArraySize(tracks_arr);
+        params->tracks = calloc(params->track_len, sizeof(*params->tracks));
+
+        i = 0;
+        cJSON_ArrayForEach(e, tracks_arr){
+            if (parse_track_cjson(e, &params->tracks[i++])){
+                params->track_len--;
+                i--;
+            }
+        }
+        if (i != params->track_len){
+            Track *tmp = realloc(params->tracks, i * sizeof(*params->tracks));
+            if (!tmp)
+                perror("error when rallocing tracks array");
+            params->tracks = tmp;
+            params->track_len = i;
+        }
+    }
+
+
+    // Playlist parsing
+    if (params->qplaylists){
+        cJSON *playlist_obj = cJSON_GetObjectItem(root, "playlists");
+        cJSON *playlist_arr = cJSON_GetObjectItem(playlist_obj, "items");
+        params->playlist_len = cJSON_GetArraySize(playlist_arr);
+        params->playlists = calloc(params->playlist_len, sizeof(*params->playlists));
+
+        i = 0;
+        cJSON_ArrayForEach(e, playlist_arr){
+            parse_playlist_info_cjson(e, &params->playlists[i++]);
+        }
+    }
+
+    // Album parsing
+    if (params->qalbums){
+        cJSON *album_obj = cJSON_GetObjectItem(root, "albums");
+        cJSON *album_arr = cJSON_GetObjectItem(album_obj, "items");
+        params->album_len = cJSON_GetArraySize(album_arr);
+        params->albums = calloc(params->album_len, sizeof(*params->albums));
+
+        i = 0;
+        cJSON_ArrayForEach(e, album_arr){
+            parse_playlist_info_cjson(e, &params->albums[i++]);
+        }
+    }
+
+    // Artist parsing
+    if (params->qartists){
+        cJSON *artist_obj = cJSON_GetObjectItem(root, "artists");
+        cJSON *artist_arr = cJSON_GetObjectItem(artist_obj, "items");
+        params->artist_len = cJSON_GetArraySize(artist_arr);
+        params->artists = calloc(params->artist_len, sizeof(*params->artists));
+
+        i = 0;
+        cJSON_ArrayForEach(e, artist_arr){
+            parse_artist_cjson(e, &params->artists[i++]);
+        }
+    }
+    cJSON_Delete(root);
+
+    return 0;
+}
+
+int
+add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
+               size_t *track_len,
+               info_received_cb func) {
+    char payload[SPOTIFY_ID_LEN + 1];
+    payload[0] = MUSIC_INFO;
+    memcpy(&payload[1], id, SPOTIFY_ID_LEN);
+    char *path = NULL;
+    track_info_filepath_id(id, &path);
+
+    struct json_track_parse_params *userp = malloc(sizeof(*userp));
+    userp->track_size = track_size;
+    userp->tracks = tracks;
+    userp->track_len = track_len;
+
+    make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_track_json, func, userp);
+    free(path);
+    return 0;
+}
+
+int
 add_playlist(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
              size_t *track_len,
              bool album, info_received_cb func) {
     char payload[SPOTIFY_ID_LEN + 1];
     memcpy(&payload[1], id, SPOTIFY_ID_LEN);
+
+    struct json_track_parse_params *userp = malloc(sizeof(*userp));
+    userp->track_size = track_size;
+    userp->tracks = tracks;
+    userp->track_len = track_len;
+
     char *path = NULL;
     int ret;
     if (album) {
         payload[0] = ALBUM_INFO;
         album_info_filepath_id(id, &path);
-        ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_album_json, func, tracks,
-                                             track_size, track_len);
+        ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_album_json, func, userp);
     } else {
         payload[0] = PLAYLIST_INFO;
         playlist_info_filepath_id(id, &path);
-        ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_playlist_json, func, tracks,
-                                             track_size, track_len);
+        ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_playlist_json, func, userp);
     }
     free(path);
     return ret;
@@ -844,8 +974,13 @@ add_recommendations(struct spotify_state *spotify, const char *track_ids,
     payload[2] = (char) artist_count;
     memcpy(&payload[3], track_ids, SPOTIFY_ID_LEN * track_count);
     memcpy(&payload[3 + SPOTIFY_ID_LEN * track_count], artist_ids, SPOTIFY_ID_LEN * artist_count);
-    return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_recommendations_json, func,
-                                          tracks, track_size, track_len);
+
+    struct json_track_parse_params *userp = malloc(sizeof(*userp));
+    userp->track_size = track_size;
+    userp->tracks = tracks;
+    userp->track_len = track_len;
+
+    return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_recommendations_json, func, userp);
 }
 
 int
@@ -885,4 +1020,26 @@ add_recommendations_from_tracks(struct spotify_state *spotify, Track **tracks,
     free(seed_tracks);
     free(seed_artists);
     return ret;
+}
+
+int
+search(struct spotify_state *spotify, const char *query, info_received_cb cb, bool tracks, bool artists, bool albums,
+       bool playlists, void *userp_in) {
+    if (!tracks && !artists && !albums && !playlists) return 0;
+    uint16_t q_len = strlen(query);
+
+    uint8_t payload[2 + sizeof(q_len) + q_len];
+    payload[0] = SEARCH;
+    payload[1] = (tracks * 1) + (artists * 2) + (albums * 4) + (playlists * 8);
+    memcpy(&payload[2], &q_len, sizeof(q_len));
+    memcpy(&payload[2+ sizeof(q_len)], query, q_len);
+
+    struct spotify_search_results *userp = calloc(1, sizeof(*userp));
+    userp->qalbums = albums;
+    userp->qartists = artists;
+    userp->qplaylists = playlists;
+    userp->qtracks = tracks;
+    userp->userp = userp_in;
+
+    return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_search_json, cb, userp);
 }

@@ -20,9 +20,10 @@ Track *next_tracks = NULL;
 size_t next_track_count = 0;
 
 void
-tracks_loaded_cb(struct spotify_state *spotify, Track *tracks) {
+tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
+    if (userp) free(userp);
     printf("[ctrl] Track list loaded\n");
-    if(play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf)){
+    if (play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf)) {
         fprintf(stderr, "[ctrl] Error when trying to play track\n");
     }
 }
@@ -98,7 +99,7 @@ handle_action(int fd, short what, void *arg) {
                 if (track_index + a.position >= track_count || track_index + a.position < 0) {
                     if (loop_mode == LOOP_MODE_PLAYLIST) {
                         track_index = 0;
-                        if(play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)){
+                        if (play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)) {
                             fprintf(stderr, "[ctrl] Error when trying to play track\n");
                         }
                         break;
@@ -112,7 +113,7 @@ handle_action(int fd, short what, void *arg) {
                     track_index += a.position;
                 }
             }
-            if(play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)){
+            if (play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)) {
                 fprintf(stderr, "[ctrl] Error when trying to play track\n");
             }
             break;
@@ -152,6 +153,12 @@ handle_action(int fd, short what, void *arg) {
             printf("[ctrl] Set position to: %ld (seek: %ld)\n", a.position, seek);
             break;
         }
+        case ACTION_SEARCH: {
+            struct search_params *params = malloc(sizeof(*params));
+            memcpy(params, &a.search_params, sizeof(*params));
+            search(ctx->spotify, params->query, search_complete_cb, params->tracks, params->artists, params->albums, params->playlists, params);
+            break;
+        }
         case ACTION_NONE: {
             break;
         }
@@ -187,7 +194,7 @@ int main(int argc, char **argv) {
     pipe(ctx.action_fd);
 
     ctx.action_event = event_new(ctx.base, ctx.action_fd[0], EV_READ | EV_PERSIST, handle_action, &ctx);
-    if (!ctx.action_event){
+    if (!ctx.action_event) {
         fprintf(stderr, "[ctrl] Error when creating action event\n");
         close(ctx.action_fd[0]);
         close(ctx.action_fd[1]);

@@ -3,6 +3,7 @@
 //
 
 #include "dbus-client.h"
+#include "spotify.h"
 #include <dbus/dbus.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,11 +50,11 @@ init_dbus_client() {
     }
 
     dbus_connection_read_write_dispatch(client_conn, 0); // Idk why, but this has to be here
-                                                                                 // Probably some dbus protocol stuff
+    // Probably some dbus protocol stuff
     char *identity = NULL;
     dbus_client_get_property("org.mpris.MediaPlayer2", "Identity", DBUS_TYPE_STRING, &identity);
 
-    if (strcmp(identity, "smp")!=0) {
+    if (strcmp(identity, "smp") != 0) {
         printf("[dbus-client] Warning: Received identity of different media player (expected: smp got: %s). Some features might be broken\n",
                identity);
     }
@@ -465,7 +466,8 @@ free_metadata(Metadata *metadata) {
 }
 
 int
-dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out, int *count_out){
+dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out,
+                          int *count_out) {
     DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
                                                     "org.mpris.MediaPlayer2.Playlists", "GetPlaylists");
     char *order_str;
@@ -507,14 +509,14 @@ dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder orde
         usleep(REPLY_WAIT_TIME_CHECK_TIME);
     }
     dbus_message_unref(msg);
-    if (!reply){
+    if (!reply) {
         fprintf(stderr, "[dbus-client] Didn't get reply when trying to get playlists\n");
         return 1;
     }
 
     DBusMessageIter iter, arr, stru;
     dbus_message_iter_init(reply, &iter);
-    if (dbus_message_iter_get_arg_type(&iter)==DBUS_TYPE_STRING){
+    if (dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_STRING) {
         char *s = NULL;
         dbus_message_iter_get_basic(&iter, &s);
         fprintf(stderr, "Got error: %s\n", s);
@@ -541,14 +543,14 @@ dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder orde
 }
 
 int
-dbus_client_get_playlist_count(uint32_t *count){
+dbus_client_get_playlist_count(uint32_t *count) {
     return dbus_client_get_property("org.mpris.MediaPlayer2.Playlists", "PlaylistCount", DBUS_TYPE_UINT32, count);
 }
 
 int
-dbus_client_get_active_playlist(DBusPlaylistInfo *out){
+dbus_client_get_active_playlist(DBusPlaylistInfo *out) {
     DBusMessage *reply;
-    if(dbus_client_get_property_reply("org.mpris.MediaPlayer2.Playlists", "ActivePlaylist", &reply)){
+    if (dbus_client_get_property_reply("org.mpris.MediaPlayer2.Playlists", "ActivePlaylist", &reply)) {
         return 1;
     }
 
@@ -575,7 +577,7 @@ dbus_client_get_active_playlist(DBusPlaylistInfo *out){
 }
 
 int
-dbus_client_activate_playlist(const char *id /* DBus object path */){
+dbus_client_activate_playlist(const char *id /* DBus object path */) {
     DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
                                                     "org.mpris.MediaPlayer2.Playlists", "ActivatePlaylist");
     dbus_message_append_args(msg, DBUS_TYPE_OBJECT_PATH, &id, DBUS_TYPE_INVALID);
@@ -596,7 +598,135 @@ dbus_client_activate_playlist(const char *id /* DBus object path */){
 }
 
 void
-free_dbus_playlist(DBusPlaylistInfo *in){
+dbus_parse_track(Track *track, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    char *val = NULL;
+    dbus_message_iter_recurse(iter, &sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    memcpy(track->spotify_id, val, sizeof(track->spotify_id));
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    memcpy(track->spotify_uri, val, sizeof(track->spotify_uri));
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    track->spotify_name = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    track->spotify_name_escaped = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    track->spotify_album_art = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    track->artist = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    track->artist_escaped = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    memcpy(track->spotify_artist_id, val, sizeof(track->spotify_artist_id));
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &track->duration_ms);
+}
+
+void
+dbus_parse_playlist(PlaylistInfo *playlist, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    char *val;
+    dbus_bool_t valb = 0;
+    dbus_message_iter_recurse(iter, &sub);
+    dbus_message_iter_get_basic(&sub, &valb);
+    playlist->album = valb;
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    playlist->name = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    playlist->image_url = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    memcpy(playlist->spotify_id, val, sizeof(playlist->spotify_id));
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &playlist->track_count);
+    playlist->not_empty = true;
+}
+
+void
+dbus_parse_artist(Artist *artist, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    char *val;
+    dbus_message_iter_recurse(iter, &sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    memcpy(artist->spotify_id, val, sizeof(artist->spotify_id));
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &val);
+    artist->name = strdup(val);
+    dbus_message_iter_next(&sub);
+    dbus_message_iter_get_basic(&sub, &artist->followers);
+}
+
+#define ADD_ARRAY(iter, out, outlen, func) { \
+    DBusMessageIter tracks_struct;\
+    dbus_message_iter_recurse(&(iter), &tracks_struct); \
+    dbus_bool_t b = 0;\
+    dbus_message_iter_get_basic(&tracks_struct, &b);\
+    dbus_message_iter_next(&tracks_struct);\
+    if (b){                                  \
+        dbus_uint32_t count;\
+        dbus_message_iter_get_basic(&tracks_struct, &count);\
+        *(out) = calloc(count, sizeof(**(out)));\
+        *(outlen) = count;\
+        dbus_message_iter_next(&tracks_struct);\
+        DBusMessageIter tracks_array;\
+        dbus_message_iter_recurse(&tracks_struct, &tracks_array);\
+        for (int i = 0; i < count; ++i) {\
+            func(&(*(out))[i], &tracks_array);\
+            dbus_message_iter_next(&tracks_array);\
+        }\
+    }                   \
+}
+
+int
+dbus_client_search(bool tracks, bool albums, bool artists, bool playlists, char *query, Track **tracksOut,
+                   size_t *tracks_len, PlaylistInfo **albumsOut, size_t *albums_len, Artist **artistsOut,
+                   size_t *artists_len, PlaylistInfo **playlistsOut, size_t *playlists_len) {
+    DBusMessage *msg = dbus_message_new_method_call(mpris_name, "/org/mpris/MediaPlayer2",
+                                                    "me.quartzy.smp", "Search");
+    dbus_bool_t t = tracks, a1 = artists, a = albums, p = playlists;
+    dbus_message_append_args(msg, DBUS_TYPE_BOOLEAN, &t, DBUS_TYPE_BOOLEAN, &a, DBUS_TYPE_BOOLEAN, &a1,
+                             DBUS_TYPE_BOOLEAN, &p, DBUS_TYPE_STRING, &query, DBUS_TYPE_INVALID);
+
+    dbus_uint32_t serial = 0;
+    dbus_connection_send(client_conn, msg, &serial);
+
+    DBusMessage *reply;
+    for (int j = 0; j < REPLY_WAIT_LOOP_COUNT; ++j) {
+        dbus_connection_read_write(client_conn, 0);
+        reply = dbus_connection_pop_message(client_conn);
+
+        if (reply) break;
+        usleep(REPLY_WAIT_TIME_CHECK_TIME);
+    }
+    if (!reply) return 1;
+
+    DBusMessageIter iter;
+    dbus_message_iter_init(reply, &iter);
+
+    // Tracks
+    ADD_ARRAY(iter, tracksOut, tracks_len, dbus_parse_track);
+    dbus_message_iter_next(&iter);
+    ADD_ARRAY(iter, albumsOut, albums_len, dbus_parse_playlist);
+    dbus_message_iter_next(&iter);
+    ADD_ARRAY(iter, playlistsOut, playlists_len, dbus_parse_playlist);
+    dbus_message_iter_next(&iter);
+    ADD_ARRAY(iter, artistsOut, artists_len, dbus_parse_artist);
+
+    dbus_message_unref(reply);
+    return 0;
+}
+
+void
+free_dbus_playlist(DBusPlaylistInfo *in) {
     if (!in || !in->valid) return;
     free(in->name);
     free(in->icon);

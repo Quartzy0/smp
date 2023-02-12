@@ -7,6 +7,7 @@
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <time.h>
+#include <dbus/dbus.h>
 
 #define TIMER_START(name) clock_t __gen_timer_ ##name = clock()
 #define TIMER_END(name) printf("Timer '" #name "' took %2.f ms\n", (double) (clock()-__gen_timer_##name) / (double) CLOCKS_PER_SEC * 1000.0)
@@ -37,7 +38,8 @@ typedef enum ActionType {
     ACTION_POSITION_ABSOLUTE,
     ACTION_TRACK_OVER,
     ACTION_SEEK,
-    ACTION_SET_POSITION
+    ACTION_SET_POSITION,
+    ACTION_SEARCH,
 } ActionType;
 
 //6yKMo95JkibE9tGN81dgFh
@@ -46,6 +48,11 @@ typedef struct Action {
     union {
         char id[23]; // All spotify ids are 22 chars long (track, album and playlist ids) + 1 null byte
         int64_t position;
+        struct search_params{
+            bool tracks, artists, albums, playlists;
+            char *query;
+            DBusMessage *msg;
+        } search_params;
     };
 } Action;
 
@@ -58,6 +65,7 @@ struct smp_context{
     struct event_base *base;
     struct event *action_event;
     int action_fd[2];
+    int dbus_event_fd[2];
     struct buffer{
         float *buf;
         size_t size;

@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <poll.h>
 #include "audio.h"
 #include "util.h"
 #include "spotify.h"
@@ -17,7 +18,6 @@ dbus_bool_t running = false;
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
 DBusConnection *conn;
-sem_t state_change_lock;
 DBusError err;
 const char *null_str = "null";
 
@@ -25,7 +25,10 @@ const char *null_str = "null";
 
 void *
 init_dbus(void *arg) {
-    struct smp_context *ctx = (struct smp_context*) arg;
+    struct smp_context *ctx = (struct smp_context *) arg;
+
+    pipe(ctx->dbus_event_fd);
+
     dbus_error_init(&err);
     conn = dbus_bus_get(DBUS_BUS_SESSION, &err);
 
@@ -91,11 +94,11 @@ void add_dict_entry_array(DBusMessageIter *dict, char *attribute, void **attr_va
     // Create the value for this entry
     dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, type_array, &dict_val);
     dbus_message_iter_open_container(&dict_val, DBUS_TYPE_ARRAY, type_str, &arr_val);
-    if (!attr_value){
+    if (!attr_value) {
         dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &null_str);
-    }else{
+    } else {
         for (int i = 0; i < count; ++i) {
-            if (!attr_value[i]){
+            if (!attr_value[i]) {
                 dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &null_str);
             } else {
                 dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_STRING, &attr_value[i]);
@@ -284,7 +287,8 @@ void get_mediaplayer_player(DBusMessage *msg, char *property, struct smp_context
         dbus_message_iter_append_basic(&var, DBUS_TYPE_DOUBLE, &volume);
     } else if (!strcmp(property, "Position") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "x", &var);
-        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0); //Convert to micoseconds
+        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) *
+                                      1000000.0); //Convert to micoseconds
         dbus_message_iter_append_basic(&var, DBUS_TYPE_INT64, &position);
     } else if (!strcmp(property, "Metadata") && started) {
         dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "a{sv}", &var);
@@ -497,7 +501,8 @@ void getall_mediaplayer_player(DBusMessage *msg, struct smp_context *ctx) {
 
     //Metadata
     if (started) {
-        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) * 1000000.0); //Convert to micoseconds
+        int64_t position = (int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) *
+                                      1000000.0); //Convert to micoseconds
         add_dict_entry_p(&dict, "Position", &position, DBUS_TYPE_INT64);
         DBusMessageIter dict_entry, dict_val;
         // Create our entry in the dictionary
@@ -729,7 +734,6 @@ int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
         memcpy(a.id, &obj[objLen - 23], 22 * sizeof(char));
         a.id[SPOTIFY_ID_LEN] = 0;
         write(ctx->action_fd[1], &a, sizeof(a));
-        sem_post(&state_change_lock);
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Playlists", "GetPlaylists")) {
         uint32_t index, max_count;
         char *order;
@@ -762,7 +766,7 @@ int check_playlist_command(DBusMessage *msg, struct smp_context *ctx) {
         DBusMessageIter reply, arr;
         dbus_message_iter_init_append(ret, &reply);
         dbus_message_iter_open_container(&reply, DBUS_TYPE_ARRAY, "(oss)", &arr);
-        for (uint32_t i = index; i < count && i < index+max_count; ++i) {
+        for (uint32_t i = index; i < count && i < index + max_count; ++i) {
             get_playlist_dbus(&arr, &playlists[i]);
         }
         dbus_message_iter_close_container(&reply, &arr);
@@ -805,7 +809,7 @@ int check_tracklist_command(DBusMessage *msg, struct smp_context *ctx) {
         const size_t id_offset = strrchr(objs[0], '/') - objs[0] + 1;
         for (size_t i = 0; i < track_count; ++i) {
             for (size_t j = 0; j < len; ++j) {
-                if (strcmp(objs[j]+ id_offset, tracks[i].spotify_id) != 0)continue;
+                if (strcmp(objs[j] + id_offset, tracks[i].spotify_id) != 0)continue;
                 get_track_metadata(&arr, &tracks[i]);
             }
         }
@@ -835,7 +839,6 @@ int check_tracklist_command(DBusMessage *msg, struct smp_context *ctx) {
             if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
             Action a = {.type = ACTION_POSITION_RELATIVE, .position = (int64_t) i};
             write(ctx->action_fd[1], &a, sizeof(a));
-            sem_post(&state_change_lock);
             break;
         }
     } else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.TrackList", "RemoveTrack") ||
@@ -847,21 +850,185 @@ int check_tracklist_command(DBusMessage *msg, struct smp_context *ctx) {
     return 1;
 }
 
+int
+check_smp_command(DBusMessage *msg, struct smp_context *ctx) {
+    if (dbus_message_is_method_call(msg, "me.quartzy.smp", "Search")) {
+        dbus_bool_t tracks, albums, artists, playlists;
+        char *query;
+        if (!dbus_message_get_args(msg, &err, DBUS_TYPE_BOOLEAN, &tracks, DBUS_TYPE_BOOLEAN, &albums, DBUS_TYPE_BOOLEAN,
+                                  &artists, DBUS_TYPE_BOOLEAN, &playlists, DBUS_TYPE_STRING, &query, DBUS_TYPE_INVALID)) {
+            if (dbus_error_is_set(&err)) {
+                dbus_error_free(&err);
+                fprintf(stderr, "[dbus] Error while decoding arguments: %s\n", err.message);
+            }
+            return 0;
+        }
+        Action a = {.type = ACTION_SEARCH, .search_params = {.tracks = tracks, .artists = artists, .albums = albums, .playlists = playlists}};
+        a.search_params.query = strdup(query);
+        a.search_params.msg = dbus_message_new_method_return(msg);
+        write(ctx->action_fd[1], &a, sizeof(a));
+        return 2;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+void
+dbus_add_track(Track *track, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &sub);
+    char *id_alloced = malloc(sizeof(track->spotify_id));
+    memcpy(id_alloced, track->spotify_id, sizeof(track->spotify_id));
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &id_alloced);
+    char *uri_alloced = malloc(sizeof(track->spotify_uri));
+    memcpy(uri_alloced, track->spotify_uri, sizeof(track->spotify_uri));
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &uri_alloced);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &track->spotify_name);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &track->spotify_name_escaped);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &track->spotify_album_art);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &track->artist);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &track->artist_escaped);
+    memcpy(id_alloced, track->spotify_artist_id, sizeof(track->spotify_artist_id));
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &id_alloced);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_UINT32, &track->duration_ms);
+    dbus_message_iter_close_container(iter, &sub);
+    free(id_alloced);
+    free(uri_alloced);
+}
+
+void
+dbus_add_playlist(PlaylistInfo *playlist, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &sub);
+    dbus_bool_t b = playlist->album;
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_BOOLEAN, &b);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &playlist->name);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &playlist->image_url);
+    char *id_alloced = malloc(sizeof(playlist->spotify_id));
+    memcpy(id_alloced, playlist->spotify_id, sizeof(playlist->spotify_id));
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &id_alloced);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_UINT32, &playlist->track_count);
+    dbus_message_iter_close_container(iter, &sub);
+    free(id_alloced);
+}
+
+void
+dbus_add_artist(Artist *artist, DBusMessageIter *iter) {
+    DBusMessageIter sub;
+    dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, NULL, &sub);
+    char *id_alloced = malloc(sizeof(artist->spotify_id));
+    memcpy(id_alloced, artist->spotify_id, sizeof(artist->spotify_id));
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &id_alloced);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &artist->name);
+    dbus_message_iter_append_basic(&sub, DBUS_TYPE_UINT32, &artist->followers);
+    dbus_message_iter_close_container(iter, &sub);
+    free(id_alloced);
+}
+
+#define ADD_DBUS_ARRAY(func, sig, len, arr, boo, reply) { \
+    DBusMessageIter db_struct;                        \
+    dbus_bool_t b = boo;\
+    if ((b)) {\
+        dbus_message_iter_open_container(&(reply), DBUS_TYPE_STRUCT, NULL, &db_struct);\
+        dbus_message_iter_append_basic(&(db_struct), DBUS_TYPE_BOOLEAN, &(b));\
+        dbus_message_iter_append_basic(&(db_struct), DBUS_TYPE_UINT32, &(len));\
+        DBusMessageIter tracks_array;\
+        dbus_message_iter_open_container(&db_struct, DBUS_TYPE_ARRAY, "("sig")", &tracks_array);\
+        for (int i = 0; i < (len); ++i) {\
+            func(&(arr)[i], &tracks_array);\
+        }\
+        dbus_message_iter_close_container(&db_struct, &tracks_array);\
+    } else {\
+        dbus_message_iter_open_container(&(reply), DBUS_TYPE_STRUCT, NULL, &db_struct);\
+        dbus_message_iter_append_basic(&(db_struct), DBUS_TYPE_BOOLEAN, &(b));\
+    }\
+    dbus_message_iter_close_container(&(reply), &db_struct);                                             \
+}
+
+void
+search_complete_cb(struct spotify_state *spotify, void *userp) {
+    write(spotify->smp_ctx->dbus_event_fd[1], &userp, sizeof(userp));
+}
+
+void
+handle_search_response(struct spotify_state *spotify,
+                       void *userp) { // Return signature: (ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))
+    struct spotify_search_results *results = (struct spotify_search_results *) userp;
+    struct search_params *params = (struct search_params *) results->userp;
+
+    dbus_uint32_t serial = 0;
+    DBusMessage *ret = params->msg;
+    DBusMessageIter reply;
+    dbus_message_iter_init_append(ret, &reply);
+
+    ADD_DBUS_ARRAY(dbus_add_track, "ssssssssu", results->track_len, results->tracks, params->tracks, reply);
+    ADD_DBUS_ARRAY(dbus_add_playlist, "bsssu", results->album_len, results->albums, params->albums, reply);
+    ADD_DBUS_ARRAY(dbus_add_playlist, "bsssu", results->playlist_len, results->playlists, params->playlists, reply);
+    ADD_DBUS_ARRAY(dbus_add_artist, "ssu", results->artist_len, results->artists, params->artists, reply);
+
+    if (!dbus_connection_send(conn, ret, &serial)) {
+        fprintf(stderr, "[dbus] Out Of Memory!\n");
+        exit(1);
+    }
+
+    // free the reply
+    dbus_message_unref(ret);
+    free(params->query);
+    free(params);
+    free_tracks(results->tracks, results->track_len);
+    free(results->tracks);
+    results->tracks = NULL;
+    for (int i = 0; i < results->playlist_len; ++i) {
+        free_playlist(&results->playlists[i]);
+    }
+    free(results->playlists);
+    results->playlists = NULL;
+    for (int i = 0; i < results->album_len; ++i) {
+        free_playlist(&results->albums[i]);
+    }
+    free(results->albums);
+    results->albums = NULL;
+    for (int i = 0; i < results->artist_len; ++i) {
+        free_artist(&results->artists[i]);
+    }
+    free(results->artists);
+    results->artists = NULL;
+    free(results);
+}
+
 void
 handle_message(struct smp_context *ctx) {
+    struct pollfd pollfd = {
+            .fd = ctx->dbus_event_fd[0],
+            .events = POLLIN,
+            .revents = 0,
+    };
+
     running = true;
     while (running) {
+        int ret;
+
         // non-blocking read of the next available message
         dbus_connection_read_write(conn, 0);
         DBusMessage *msg = dbus_connection_pop_message(conn);
 
+        ret = poll(&pollfd, 1, 10);
+        if (ret == -1) {
+            if (errno != EINTR) {
+                perror("poll() failed");
+            }
+        } else if (ret != 0 && pollfd.revents & POLLIN) {
+            struct spotify_search_results *results = NULL;
+            read(pollfd.fd, &results, sizeof(results));
+            handle_search_response(ctx->spotify, results);
+        }
         // loop again if we haven't got a message
         if (NULL == msg) {
             usleep(10000);
             continue;
         }
 
-        int ret;
         dbus_uint32_t serial = 0;
         // check this is a method call for the right interface & method
         if (dbus_message_is_method_call(msg, "org.freedesktop.DBus.Properties", "GetAll")) {
@@ -983,6 +1150,18 @@ handle_message(struct smp_context *ctx) {
                 // free the reply
                 dbus_message_unref(reply);
             }
+        } else if ((ret = check_smp_command(msg, ctx))) {
+            if (ret == 1) {
+                DBusMessage *reply = dbus_message_new_method_return(msg);
+
+                // send the reply && flush the connection
+                if (!dbus_connection_send(conn, reply, &serial)) {
+                    fprintf(stderr, "[dbus] Out Of Memory!\n");
+                }
+
+                // free the reply
+                dbus_message_unref(reply);
+            } else if (ret == 3) goto dont_unref;
         }
             // If we don't recognize the call, say so
         else
@@ -1005,6 +1184,7 @@ handle_message(struct smp_context *ctx) {
 
         // free the message
         dbus_message_unref(msg);
+        dont_unref:;
     }
 }
 

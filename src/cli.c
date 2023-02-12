@@ -157,18 +157,19 @@ track(int argc, char **argv) {
                 char **tracks = NULL;
                 int count = 0;
                 dbus_client_tracklist_get_tracks(&tracks, &count);
-                if (count != 0){
+                if (count != 0) {
                     Metadata *metadata = calloc(count, sizeof(*metadata));
                     dbus_client_get_tracks_metadata(tracks, count, metadata);
                     for (int i = 0; i < count; ++i) {
-                        printf("[%d] '%s' by '%s' (%s)\n", i + 1, metadata[i].title, metadata[i].artist, metadata[i].url);
+                        printf("[%d] '%s' by '%s' (%s)\n", i + 1, metadata[i].title, metadata[i].artist,
+                               metadata[i].url);
                     }
                     for (int i = 0; i < count; ++i) {
                         free(tracks[i]);
                         free_metadata(&metadata[i]);
                     }
                     free(metadata);
-                }else{
+                } else {
                     printf("No tracks loaded\n");
                 }
                 free(tracks);
@@ -180,6 +181,12 @@ track(int argc, char **argv) {
                 printf("?? getopt returned character code 0%o ??\n", c);
         }
     }
+}
+
+void
+search_completed_cb(struct spotify_state *spotify, void *userp) {
+    struct spotify_search_results *res = (struct spotify_search_results *) userp;
+
 }
 
 void
@@ -254,14 +261,16 @@ search_cli(int argc, char **argv) {
     }
     printf("Searching with query: %s\n", query);
 
+    if (init_dbus_client())
+        return;
+
     Track *tracks = NULL;
     PlaylistInfo *albums = NULL;
     PlaylistInfo *playlists = NULL;
     size_t track_count = 0, album_count = 0, playlist_count = 0;
     for (int i = 0; i < 3; ++i) {
-        int r = search(query, (Track **) ((uint64_t) &tracks * t), &track_count,
-                       (PlaylistInfo **) ((uint64_t) &playlists * p),
-                       &playlist_count, (PlaylistInfo **) ((uint64_t) &albums * a), &album_count);
+        int r = dbus_client_search(t, a, false, p, query, &tracks, &track_count, &albums, &album_count, NULL, NULL,
+                                   &playlists, &playlist_count);
         if (!r)break;
         if (i == 2) {
             fprintf(stderr, "[cli] Failed to search after 3 attempts\n");
@@ -525,7 +534,7 @@ void playlists(int argc, char **argv) {
                 }
 
                 dbus_client_activate_playlist(playlists[i - 1].id);
-                printf("Playing %s\n", playlists[i-1].name);
+                printf("Playing %s\n", playlists[i - 1].name);
                 for (int j = 0; j < count; ++j) {
                     free_dbus_playlist(&playlists[j]);
                 }
