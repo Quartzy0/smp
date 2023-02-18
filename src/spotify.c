@@ -296,8 +296,12 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
             conn->cache_path = NULL; // Not caching errors
         } else {
             conn->error_buffer = NULL;
-            if (conn->cache_path) conn->cache_fp = fopen(conn->cache_path, "w");
-            else conn->cache_fp = NULL;
+            if (conn->cache_path) {
+                conn->cache_fp = fopen(conn->cache_path, "w");
+                fwrite(&conn->expecting, sizeof(conn->expecting), 1, conn->cache_fp);
+            } else {
+                conn->cache_fp = NULL;
+            }
         }
         conn->error_type = data[0];
         printf("[spotify] Receiving data: %s\n", err_c[conn->error_type]);
@@ -480,8 +484,19 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
     free(path);
     path = NULL;
     if (!fp) return 1;
+    fseek(fp, 0L, SEEK_END);
+    size_t file_len = ftell(fp);
+    rewind(fp);
+
     struct evbuffer *file_buf = evbuffer_new();
     evbuffer_add_file(file_buf, fileno(fp), 0, -1);
+
+    size_t expected_len = 0;
+    evbuffer_remove(file_buf, &expected_len, sizeof(expected_len));
+    if (expected_len != file_len - sizeof(expected_len)) goto fail;
+    free(path);
+    path = NULL;
+
     size_t p = 0;
     int ret, fails = 0;
     while ((ret = decode_vorbis(file_buf, buf, &spotify->decode_ctx, &p, &spotify->smp_ctx->audio_info,

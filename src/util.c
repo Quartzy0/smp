@@ -336,6 +336,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
 
 void
 clean_vorbis_decode(struct decode_context *ctx){
+    if (!ctx) return;
     ctx->state = EOS;
     vorbis_block_clear(&ctx->vb);
     vorbis_dsp_clear(&ctx->vd);
