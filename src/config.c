@@ -20,7 +20,7 @@ size_t album_info_path_len;
 char *playlist_info_path;
 size_t playlist_info_path_len;
 double initial_volume;
-char **backend_instances;
+struct backend_instance *backend_instances;
 size_t backend_instance_count;
 
 const char config_home_suffix[] = "/.config/";
@@ -170,7 +170,7 @@ load_config() {
         backend_instance_count = cJSON_GetArraySize(v);
         backend_instances = calloc(backend_instance_count, sizeof(*backend_instances));
         for (int i = 0; i < backend_instance_count; ++i) {
-            backend_instances[i] = strdup(cJSON_GetArrayItem(v, i)->valuestring);
+            backend_instances[i].host = strdup(cJSON_GetArrayItem(v, i)->valuestring);
         }
     }
 
@@ -184,7 +184,7 @@ load_config() {
         if (i != 0) {
             printf(",");
         }
-        printf("%s", backend_instances[i]);
+        printf("%s", backend_instances[i].host);
     }
     printf("\n");
     return 0;
@@ -197,7 +197,8 @@ clean_config() {
     free(track_info_path);
     free(track_save_path);
     for (int i = 0; i < backend_instance_count; ++i) {
-        free(backend_instances[i]);
+        free(backend_instances[i].regions);
+        free(backend_instances[i].host);
     }
     free(backend_instances);
 }

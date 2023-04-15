@@ -15,7 +15,9 @@ include_directories(include)
 
 option(NO_PIPEWIRE "Use PipeWire as backend" OFF)
 
-add_executable(smp src/main.c src/spotify.c src/util.c src/spotify.h src/util.h src/audio.c src/audio.h src/dbus.c src/dbus.h src/config.c src/config.h src/dbus-client.c src/dbus-client.h src/cli.c src/cli.h src/audio-pipewire.c)
+file(GLOB smp_SRC CONFIGURE_DEPENDS "src/*.h" "src/*.c")
+
+add_executable(smp ${smp_SRC})
 
 find_package(PipeWire QUIET)
 if (NOT NO_PIPEWIRE AND PipeWire_FOUND)

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 extern uint32_t preload_amount;
 extern char *track_save_path;
@@ -19,10 +20,16 @@ extern char *playlist_info_path;
 extern size_t playlist_info_path_len;
 extern double initial_volume;
 
-extern char **backend_instances;
+extern struct backend_instance{
+    char *host;
+    char *regions;
+    size_t region_count;
+    bool disabled;
+} *backend_instances;
+
 extern size_t backend_instance_count;
 
-#define random_backend_instance (backend_instances[(int) (((float) rand()/(float) RAND_MAX) * (float) backend_instance_count)])
+#define random_backend_instance (&backend_instances[(int) (((float) rand()/(float) RAND_MAX) * (float) backend_instance_count)])
 
 int load_config();
 

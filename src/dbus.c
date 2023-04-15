@@ -384,15 +384,17 @@ void get_mediaplayer_tracklist(DBusMessage *msg, char *property) {
         DBusMessageIter arr_val;
         dbus_message_iter_open_container(&var, DBUS_TYPE_ARRAY, "o", &arr_val);
 
-        static const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
-        char *object = malloc(sizeof(base_path) + 22 * sizeof(*object)); //Enough space for ids
-        object[sizeof(base_path) + 22 - 1] = 0;
-        memcpy(object, base_path, sizeof(base_path) - 1);
-        for (int i = 0; i < track_count; ++i) {
-            memcpy(object + sizeof(base_path) - 1, tracks[i].spotify_id, 22);
-            dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_OBJECT_PATH, &object);
+        if (track_count != -1){
+            static const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
+            char *object = malloc(sizeof(base_path) + 22 * sizeof(*object)); //Enough space for ids
+            object[sizeof(base_path) + 22 - 1] = 0;
+            memcpy(object, base_path, sizeof(base_path) - 1);
+            for (int i = 0; i < track_count; ++i) {
+                memcpy(object + sizeof(base_path) - 1, tracks[i].spotify_id, 22);
+                dbus_message_iter_append_basic(&arr_val, DBUS_TYPE_OBJECT_PATH, &object);
+            }
+            free(object);
         }
-        free(object);
 
         // Clean up and return
         dbus_message_iter_close_container(&var, &arr_val);

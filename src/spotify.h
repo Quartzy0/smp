@@ -45,6 +45,8 @@ typedef struct Track {
     char *artist;
     char *artist_escaped;
     char spotify_artist_id[SPOTIFY_ID_LEN_NULL];
+    char *regions;
+    size_t region_count;
     uint32_t duration_ms;
     uint32_t download_state; //enum DownloadState
     PlaylistInfo *playlist;
@@ -64,6 +66,7 @@ enum spotify_packet_type {
     RECOMMENDATIONS = 4,
     ARTIST_INFO = 5,
     SEARCH = 6,
+    AVAILABLE_REGIONS = 7,
 };
 
 enum error_type {
@@ -94,6 +97,8 @@ typedef int(*json_parse_func)(const char *data, size_t len, void *userp);
 
 typedef void(*info_received_cb)(struct spotify_state *spotify, void *userp);
 
+typedef void(*connection_error_cb)(struct connection *conn, void *userp);
+
 struct parse_func_params {
     char *path;
     json_parse_func func;
@@ -104,6 +109,7 @@ struct parse_func_params {
 struct spotify_state {
     struct connection {
         struct bufferevent *bev;
+        struct backend_instance *inst;
         bool busy;
 
         size_t expecting;
@@ -126,13 +132,18 @@ struct spotify_state {
     struct event_base *base;
     struct decode_context decode_ctx;
     struct smp_context *smp_ctx;
+
+    connection_error_cb err_cb;
+    void *err_userp;
 };
 
 void clear_tracks(Track *tracks, size_t *track_len, size_t *track_size);
 
-int play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf);
+int play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, char *region);
 
-int ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]);
+int ensure_track(struct spotify_state *spotify, const Track *track, char *region);
+
+int refresh_available_regions(struct spotify_state *spotify);
 
 int add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
                    size_t *track_len,

@@ -14,8 +14,8 @@
 
 size_t track_index = -1;
 Track *tracks = NULL;
-size_t track_count;
-size_t track_size;
+size_t track_count = -1;
+size_t track_size = -1;
 Track *next_tracks = NULL;
 size_t next_track_count = 0;
 
@@ -23,9 +23,16 @@ void
 tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
     if (userp) free(userp);
     printf("[ctrl] Track list loaded\n");
-    if (play_track(spotify, tracks[track_index].spotify_id, &spotify->smp_ctx->audio_buf)) {
+    if (play_track(spotify, &tracks[track_index], &spotify->smp_ctx->audio_buf, NULL)) {
         fprintf(stderr, "[ctrl] Error when trying to play track\n");
     }
+}
+
+void
+spotify_conn_err(struct connection *conn, void *userp){
+    Action a = {.type = ACTION_POSITION_RELATIVE, .position = 1};
+    write(conn->spotify->smp_ctx->action_fd[1], &a, sizeof(a)); // Try playing next track on failure
+    printf("[ctrl] Error occurred on connection, trying to play next track\n");
 }
 
 void
@@ -86,7 +93,7 @@ handle_action(int fd, short what, void *arg) {
         }
         case ACTION_TRACK_OVER:
         case ACTION_POSITION_RELATIVE: {
-            if (!started) break;
+            if (track_index == -1 || track_size == -1 || track_count == -1 || track_count == 0) break;
             if (a.type == ACTION_TRACK_OVER && loop_mode == LOOP_MODE_TRACK) {
                 //Do nothing
             } else if (shuffle) {
@@ -99,7 +106,7 @@ handle_action(int fd, short what, void *arg) {
                 if (track_index + a.position >= track_count || track_index + a.position < 0) {
                     if (loop_mode == LOOP_MODE_PLAYLIST) {
                         track_index = 0;
-                        if (play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)) {
+                        if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
                             fprintf(stderr, "[ctrl] Error when trying to play track\n");
                         }
                         break;
@@ -113,7 +120,7 @@ handle_action(int fd, short what, void *arg) {
                     track_index += a.position;
                 }
             }
-            if (play_track(ctx->spotify, tracks[track_index].spotify_id, &ctx->audio_buf)) {
+            if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
                 fprintf(stderr, "[ctrl] Error when trying to play track\n");
             }
             break;
@@ -178,6 +185,7 @@ int main(int argc, char **argv) {
     struct spotify_state state;
     memset(&state, 0, sizeof(state));
     state.connections_len = 0;
+    state.err_cb = spotify_conn_err;
     struct smp_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.base = event_base_new();
@@ -208,6 +216,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[ctrl] Error occurred while trying to create downloader thread: %s\n", strerror(errno));
         return EXIT_FAILURE;
     }
+
+    refresh_available_regions(&state);
 
     event_base_dispatch(ctx.base);
 

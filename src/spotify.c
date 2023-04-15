@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include "../lib/cjson/cJSON.h"
 #include <errno.h>
 #include <dirent.h>
@@ -21,6 +20,28 @@ struct json_track_parse_params{
     size_t *track_size;
     size_t *track_len;
 };
+
+struct backend_sort{
+    struct backend_instance *inst;
+    uint32_t score;
+    char *fmatch;
+};
+
+bool
+contains_regions(char *regions, size_t region_count, char *region){
+    char *ret = regions;
+    while(ret){
+        ret = memchr(ret, region[0], region_count*2-(ret-regions));
+        if (ret && ret[1]==region[1]) return true;
+        ret++;
+    }
+    return false;
+}
+
+int
+backend_sort_comprar(const void *a, const void *b){
+    return (int) (((struct backend_sort*)a)->score-((struct backend_sort*)b)->score);
+}
 
 int
 parse_playlist_info(const char *data, size_t len, PlaylistInfo *playlist);
@@ -84,6 +105,23 @@ free_playlist(PlaylistInfo *playlist) {
 void
 free_artist(Artist *artist){
     free(artist->name);
+}
+
+void
+free_connection(struct connection *conn){
+    free(conn->payload);
+    conn->payload = NULL;
+    conn->payload_len = 0;
+    free(conn->cache_path);
+    conn->cache_path = NULL;
+    if (conn->cache_fp){
+        fclose(conn->cache_fp);
+        conn->cache_fp = NULL;
+    }
+    conn->busy = false;
+    conn->retries = 0;
+    conn->expecting = conn->progress = 0;
+    conn->error_type = ET_NO_ERROR;
 }
 
 void
@@ -156,7 +194,7 @@ get_all_playlists_from_dir(PlaylistInfo *playlistInfo, size_t count, const char 
         return 1;
     }
     size_t dir_len = strlen(dir);
-    char *name = malloc(PLAYLIST_NAME_LEN_NULL + dir_len + 5);
+    char *name = calloc(PLAYLIST_NAME_LEN_NULL + dir_len + 5, sizeof(*name));
     memcpy(name, dir, dir_len);
 
     errno = 0;
@@ -221,20 +259,47 @@ void spotify_bufferevent_cb(struct bufferevent *bev, short what, void *ctx){
             if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return;
             bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
         }else{
-            if (conn->retries >= 3)
+            if (conn->retries >= 3){
                 fprintf(stderr, "[spotify] Error occurred on connection. Closing because failed after 3 retries.\n");
-            else
+                if (conn->spotify->err_cb) conn->spotify->err_cb(conn, conn->spotify->err_userp);
+                conn->inst->disabled = true;
+            }else{
                 fprintf(stderr, "[spotify] Error occurred on connection. Closing because was idle.\n");
+            }
+            free_connection(conn);
             bufferevent_free(bev);
             conn->bev = NULL;
-            if (conn->cache_fp) fclose(conn->cache_fp);
-            free(conn->cache_path);
-            free(conn->payload);
-            conn->payload = NULL;
-            conn->cache_path = NULL;
-            conn->cache_fp = NULL;
         }
     }
+}
+
+struct connection *
+spotify_connect_with_backend(struct backend_instance *inst, struct spotify_state *spotify){
+    printf("[spotify] Creating spotify connection\n");
+    size_t avail = -1;
+    for (size_t i = 0; i < spotify->connections_len; ++i) {
+        if (spotify->connections[i].inst != inst) continue;
+        if (spotify->connections[i].bev && !spotify->connections[i].busy){
+            printf("[spotify] Found existing free connection\n");
+            return &spotify->connections[i];
+        }else if (!spotify->connections[i].busy && avail == -1){
+            avail = i;
+        }
+    }
+    if (spotify->connections_len >= CONNECTION_POOL_MAX && avail == -1) return NULL;
+    printf("[spotify] Creating new connection to %s\n", inst->host);
+    if (avail == -1) avail = spotify->connections_len++;
+    spotify->connections[avail].inst = inst;
+    spotify->connections[avail].spotify = spotify;
+    spotify->connections[avail].bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_enable(spotify->connections[avail].bev, EV_READ | EV_WRITE);
+    bufferevent_setcb(spotify->connections[avail].bev, generic_read_cb, NULL, spotify_bufferevent_cb, &spotify->connections[avail]);
+    if (bufferevent_socket_connect_hostname(spotify->connections[avail].bev, NULL, AF_UNSPEC, inst->host,
+                                            SPOTIFY_PORT) != 0) {
+        bufferevent_free(spotify->connections[avail].bev);
+        return NULL;
+    }
+    return &spotify->connections[avail];
 }
 
 struct connection *
@@ -250,13 +315,36 @@ spotify_connect(struct spotify_state *spotify) {
         }
     }
     if (spotify->connections_len >= CONNECTION_POOL_MAX && avail == -1) return NULL;
-    char *inst = random_backend_instance;
-    printf("[spotify] Creating new connection to %s\n", inst);
+
+    size_t avail_inst = -1;
+    for (int i = 0; i < backend_instance_count; ++i) {
+        if (!backend_instances[i].disabled){
+            if (avail_inst == -1) avail_inst = i;
+            else avail_inst = -2;
+        }
+    }
+
+    struct backend_instance *inst;
+
+    if (avail_inst == -2) {
+        inst = random_backend_instance;
+        while (inst->disabled){
+            inst = random_backend_instance;
+        }
+    }else if (avail_inst == -1){
+        fprintf(stderr, "[spotify] All backend instances have been marked as disabled. To retry, restart the program.\n");
+        return NULL;
+    }else{
+        inst = &backend_instances[avail_inst];
+    }
+
+    printf("[spotify] Creating new connection to %s\n", inst->host);
     if (avail == -1) avail = spotify->connections_len++;
+    spotify->connections[avail].inst = inst;
     spotify->connections[avail].bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(spotify->connections[avail].bev, EV_READ | EV_WRITE);
     bufferevent_setcb(spotify->connections[avail].bev, generic_read_cb, NULL, spotify_bufferevent_cb, &spotify->connections[avail]);
-    if (bufferevent_socket_connect_hostname(spotify->connections[avail].bev, NULL, AF_UNSPEC, inst,
+    if (bufferevent_socket_connect_hostname(spotify->connections[avail].bev, NULL, AF_UNSPEC, inst->host,
                                             SPOTIFY_PORT) != 0) {
         bufferevent_free(spotify->connections[avail].bev);
         return NULL;
@@ -269,14 +357,15 @@ spotify_reconnect(struct connection *conn) {
     printf("[spotify] Recreating spotify connection\n");
     struct spotify_state *spotify = conn->spotify;
 
+    bufferevent_setcb(conn->bev, NULL, NULL, NULL, NULL);
     bufferevent_free(conn->bev);
 
-    char *inst = random_backend_instance;
-    printf("[spotify] Creating new connection to %s\n", inst);
+    struct backend_instance *inst = random_backend_instance;
+    printf("[spotify] Creating new connection to %s\n", inst->host);
     conn->bev = bufferevent_socket_new(spotify->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(conn->bev, EV_READ | EV_WRITE);
     bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
-    if (bufferevent_socket_connect_hostname(conn->bev, NULL, AF_UNSPEC, inst,
+    if (bufferevent_socket_connect_hostname(conn->bev, NULL, AF_UNSPEC, inst->host,
                                             SPOTIFY_PORT) != 0) {
         bufferevent_free(conn->bev);
     }
@@ -314,12 +403,16 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
                     conn->error_buffer);
             free(conn->error_buffer);
             conn->error_buffer = NULL;
-            if (conn->error_type == ET_SPOTIFY || conn->retries >= 3){
+            if (conn->error_type == ET_SPOTIFY || conn->retries > 3){
+                if (conn->spotify->err_cb) conn->spotify->err_cb(conn, conn->spotify->err_userp);
+                free_connection(conn);
                 conn->busy = false;
                 return; // ET_SPOTIFY means an error with the query (invalid track id, etc.) so reconnecting won't help
             }
             spotify_reconnect(conn);
             conn->retries++;
+            conn->expecting = conn->progress = 0;
+            conn->error_type = ET_NO_ERROR;
             if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return;
             bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
         }
@@ -371,6 +464,35 @@ generic_proxy_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
 }
 
 int
+make_and_parse_generic_request_with_conn(struct connection *conn, char *payload, size_t payload_len,
+                               json_parse_func func, info_received_cb func1, void *userp){
+    if (!conn) return -1;
+
+    conn->params.func_userp = userp;
+    conn->params.func = func;
+    conn->params.func1 = func1;
+
+    conn->progress = 0;
+    conn->expecting = 0;
+    conn->busy = true;
+    if (conn->cache_path) {
+        free(conn->cache_path);
+        conn->cache_path = NULL;
+    }
+    conn->cb = generic_proxy_cb;
+    conn->cb_arg = &conn->params;
+
+    conn->payload = malloc(payload_len);
+    memcpy(conn->payload, payload,
+           payload_len); // Payload copied in case of error when the request has to be resent
+    conn->payload_len = payload_len;
+
+    if (bufferevent_write(conn->bev, payload, payload_len) != 0) return -1;
+    bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
+    return 0;
+}
+
+int
 make_and_parse_generic_request(struct spotify_state *spotify, char *payload, size_t payload_len, char *cache_path,
                                json_parse_func func, info_received_cb func1, void *userp) {
     //Try to read from file
@@ -402,30 +524,9 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         }else {
             conn->params.path = NULL;
         }
-        conn->params.func_userp = userp;
-        conn->params.func = func;
-        conn->params.func1 = func1;
-
-        conn->progress = 0;
-        conn->expecting = 0;
-        conn->busy = true;
         conn->spotify = spotify;
-        if (conn->cache_path) {
-            free(conn->cache_path);
-            conn->cache_path = NULL;
-        }
-        conn->cb = generic_proxy_cb;
-        conn->cb_arg = &conn->params;
-
-        conn->payload = malloc(payload_len);
-        memcpy(conn->payload, payload,
-               payload_len); // Payload copied in case of error when the request has to be resent
-        conn->payload_len = payload_len;
-
-        if (bufferevent_write(conn->bev, payload, payload_len) != 0) return -1;
-        bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
+        return make_and_parse_generic_request_with_conn(conn, payload, payload_len, func, func1, userp);
     };
-    return 0;
 }
 
 void
@@ -445,14 +546,53 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
 }
 
 int
-read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf) {
-    struct connection *conn = spotify_connect(spotify);
+read_remote_track(struct spotify_state *spotify, const Track *track, struct buffer *buf) {
+    // Choose best instance based on available regions
+    struct backend_sort scores[backend_instance_count];
+    memset(scores, 0, sizeof(scores));
+    for (int i = 0; i < backend_instance_count; ++i) {
+        uint32_t incl = 0;
+        for (int j = 0; j < backend_instances[i].region_count; ++j) {
+            incl += contains_regions(track->regions, track->region_count, &backend_instances[i].regions[j*2]);
+            if (!scores[i].fmatch) scores[i].fmatch = &backend_instances[i].regions[j*2];
+        }
+        scores[i].inst = &backend_instances[i];
+        scores[i].score = (uint32_t) (((float) incl / (float) backend_instances[i].region_count) * 1000);
+    }
+    qsort(scores, backend_instance_count, sizeof(*scores), backend_sort_comprar);
+
+    size_t fzero = backend_instance_count;
+    for (int i = 0; i < backend_instance_count; ++i) {
+        if (scores[i].score == 0) {
+            fzero = i;
+            break;
+        }
+    }
+    if (fzero == 0){
+        fprintf(stderr, "[spotify] No backends with support for any regions of track with id '%s'. Needed one of following regions: ", track->spotify_id);
+        for (int i = 0; i < track->region_count; ++i) {
+            if (i == track->region_count-1)
+                fprintf(stderr, "%.2s\n", &track->regions[i*2]);
+            else
+                fprintf(stderr, "%.2s,", &track->regions[i*2]);
+        }
+        return 1;
+    }
+    struct backend_sort *inst = &scores[((uint32_t) (((float)rand()/(float)RAND_MAX)*(float) (fzero / 2 + 1)))];
+
+    struct connection *conn = spotify_connect_with_backend(inst->inst, spotify);
     if (!conn) return -1;
 
-    conn->payload = malloc(23);
-    conn->payload_len = 23;
+    conn->payload = malloc(25);
+    conn->payload_len = 25;
     conn->payload[0] = MUSIC_DATA;
-    memcpy(&conn->payload[1], id, 22); // Payload stored for later in case of error if it has to be resent
+    memcpy(&conn->payload[1], track->spotify_id, 22); // Payload stored for later in case of error if it has to be resent
+    if (inst->score != 1000){
+        conn->payload[23] = inst->fmatch[0];
+        conn->payload[24] = inst->fmatch[1];
+    }else{
+        conn->payload[23] = conn->payload[24] = 0;
+    }
 
     conn->progress = 0;
     conn->expecting = 0;
@@ -469,7 +609,7 @@ read_remote_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], 
         free(conn->cache_path);
         conn->cache_path = NULL;
     }
-    track_filepath_id(id, &conn->cache_path);
+    track_filepath_id(track->spotify_id, &conn->cache_path);
 
     if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return -1;
     bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
@@ -522,29 +662,53 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
 }
 
 int
-play_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], struct buffer *buf) {
-    if (!spotify || !id || !buf) return 1;
+play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, char *region) {
+    if (!spotify || !track || !buf) return 1;
     memset(&spotify->decode_ctx, 0, sizeof(spotify->decode_ctx));
-    if (read_local_track(spotify, id, buf))
-        return read_remote_track(spotify, id, buf); // TODO: Handle audio corruption on remote track
+    if (read_local_track(spotify, track->spotify_id, buf))
+        return read_remote_track(spotify, track, buf); // TODO: Handle audio corruption on remote track
     return 0;
 }
 
 int
-ensure_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN]) {
-    if (!spotify || !id) return 1;
+ensure_track(struct spotify_state *spotify, const Track *track, char *region) {
+    if (!spotify || !track) return 1;
     char *path = NULL;
-    track_filepath_id(id, &path);
+    track_filepath_id(track->spotify_id, &path);
     if (!access(path, R_OK)) {
         free(path);
         return 0;
     }
     free(path);
-    return read_remote_track(spotify, id, NULL);
+    return read_remote_track(spotify, track, NULL);
+}
+
+int
+parse_available_regions(const char *data, size_t len, void *userp){
+    struct backend_instance *inst = (struct backend_instance*) userp;
+    if (inst->regions){
+        free(inst->regions);
+        inst->regions = NULL;
+    }
+    inst->region_count = len / 2;
+    inst->regions = calloc(inst->region_count, 2);
+    memcpy(inst->regions, data, len);
+    printf("[spotify] Got available regions for '%s': ", inst->host);
+    for (int i = 0; i < inst->region_count; ++i) {
+        if (i == inst->region_count-1)
+            printf("%.2s\n", &inst->regions[i*2]);
+        else
+            printf("%.2s,", &inst->regions[i*2]);
+    }
+    return 0;
 }
 
 int
 parse_track_cjson(cJSON *track_json, Track *track){
+    if (cJSON_IsNull(track_json)){
+        cJSON_Delete(track_json);
+        return 1;
+    }
     char *id = cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "id"));
     if (cJSON_IsTrue(cJSON_GetObjectItem(track_json, "is_local"))) {
         fprintf(stderr, "[spotify] Local spotify tracks cannot be downloaded. (ID: %s)\n", id);
@@ -558,9 +722,11 @@ parse_track_cjson(cJSON *track_json, Track *track){
     sanitize(&track->spotify_name);
     track->spotify_name_escaped = urlencode(track->spotify_name);
     memcpy(track->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "uri")), SPOTIFY_URI_LEN_NULL);
-    track->spotify_album_art = strdup(cJSON_GetStringValue(
+
+    char *album_cover = cJSON_GetStringValue(
             cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(track_json, "album"), "images"),
-                                                   0), "url")));
+                                                   0), "url"));
+    track->spotify_album_art = album_cover ? strdup(album_cover) : NULL; // Null when parsing album's tracks
     track->download_state = DS_NOT_DOWNLOADED;
     track->duration_ms = cJSON_GetObjectItem(track_json, "duration_ms")->valueint;
 
@@ -570,6 +736,19 @@ parse_track_cjson(cJSON *track_json, Track *track){
     memcpy(track->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
     sanitize(&track->artist);
     track->artist_escaped = urlencode(track->artist);
+
+    cJSON *markets = cJSON_GetObjectItem(track_json, "available_markets");
+    track->region_count = cJSON_GetArraySize(markets);
+    track->regions = calloc(track->region_count, 2);
+
+    int i = 0;
+    cJSON *e;
+    cJSON_ArrayForEach(e, markets){
+        char *s = cJSON_GetStringValue(e);
+        track->regions[i*2] = s[0];
+        track->regions[i*2+1] = s[1];
+        i++;
+    }
     return 0;
 }
 
@@ -584,7 +763,11 @@ parse_playlist_info_cjson(cJSON *root, PlaylistInfo *playlist){
     if (playlist->album) {
         playlist->track_count = cJSON_GetObjectItem(root, "total_tracks")->valueint;
     } else {
-        playlist->track_count = cJSON_GetArraySize(cJSON_GetObjectItem(root, "tracks"));
+        if (cJSON_HasObjectItem(cJSON_GetObjectItem(root, "tracks"), "total")){
+            playlist->track_count = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "tracks"), "total")->valueint;
+        }else{
+            playlist->track_count = cJSON_GetArraySize(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "tracks"), "items"));
+        }
     }
 }
 
@@ -704,25 +887,13 @@ parse_album_json(const char *data, size_t len, void *userp) {
 
     cJSON *track;
     cJSON_ArrayForEach(track, tracks_array) {
-        memcpy((*tracks)[i].spotify_id, cJSON_GetObjectItem(track, "id")->valuestring, 23);
-        (*tracks)[i].spotify_name = strdup(cJSON_GetObjectItem(track, "name")->valuestring);
-        sanitize(&(*tracks)[i].spotify_name);
-        (*tracks)[i].spotify_name_escaped = urlencode((*tracks)[i].spotify_name);
-        memcpy((*tracks)[i].spotify_uri, cJSON_GetObjectItem(track, "uri")->valuestring, 37);
-        (*tracks)[i].artist = strdup(
-                cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
-        sanitize(&(*tracks)[i].artist);
-        (*tracks)[i].artist_escaped = urlencode((*tracks)[i].artist);
-        memcpy((*tracks)[i].spotify_artist_id,
-               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
-               SPOTIFY_ID_LEN_NULL);
+        if(parse_track_cjson(track, &(*tracks)[i])) continue;
         (*tracks)[i].spotify_album_art = strdup(playlist->image_url);
-        (*tracks)[i].download_state = DS_NOT_DOWNLOADED;
-        (*tracks)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
         (*tracks)[i].playlist = playlist;
         playlist->reference_count++;
         i++;
     }
+    *track_len = i;
     playlist->track_count = cJSON_GetArraySize(tracks_array);
     cJSON_Delete(root);
     return 0;
@@ -766,30 +937,12 @@ parse_playlist_json(const char *data, size_t len, void *userp) {
 
     cJSON *element;
     cJSON_ArrayForEach(element, tracks_array) {
-        cJSON *track = cJSON_GetObjectItem(element, "track");
-        if (cJSON_IsNull(track) || cJSON_IsTrue(cJSON_GetObjectItem(track, "is_local"))) {
-            continue;
-        }
-        memcpy((*tracks)[i].spotify_id, cJSON_GetObjectItem(track, "id")->valuestring, 23);
-        (*tracks)[i].spotify_name = strdup(cJSON_GetObjectItem(track, "name")->valuestring);
-        sanitize(&(*tracks)[i].spotify_name);
-        (*tracks)[i].spotify_name_escaped = urlencode((*tracks)[i].spotify_name);
-        memcpy((*tracks)[i].spotify_uri, cJSON_GetObjectItem(track, "uri")->valuestring, 37);
-        (*tracks)[i].artist = strdup(
-                cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
-        sanitize(&(*tracks)[i].artist);
-        (*tracks)[i].artist_escaped = urlencode((*tracks)[i].artist);
-        memcpy((*tracks)[i].spotify_artist_id,
-               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
-               SPOTIFY_ID_LEN_NULL);
-        (*tracks)[i].spotify_album_art = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(
-                cJSON_GetObjectItem(track, "album"), "images"), 0), "url")->valuestring);
-        (*tracks)[i].download_state = DS_NOT_DOWNLOADED;
-        (*tracks)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
+        if(parse_track_cjson(cJSON_GetObjectItem(element, "track"), &(*tracks)[i])) continue;
         (*tracks)[i].playlist = playlist;
         playlist->reference_count++;
         i++;
     }
+    *track_len = i;
     playlist->track_count = track_array_len;
     cJSON_Delete(root);
     return 0;
@@ -824,28 +977,10 @@ parse_recommendations_json(const char *data, size_t len, void *userp) {
 
     cJSON *track;
     cJSON_ArrayForEach(track, tracks_array) {
-        if (cJSON_IsNull(track)) {
-            continue;
-        }
-        memcpy((*tracks)[i].spotify_id, cJSON_GetObjectItem(track, "id")->valuestring, 23);
-        (*tracks)[i].spotify_name = strdup(cJSON_GetObjectItem(track, "name")->valuestring);
-        sanitize(&(*tracks)[i].spotify_name);
-        (*tracks)[i].spotify_name_escaped = urlencode((*tracks)[i].spotify_name);
-        memcpy((*tracks)[i].spotify_uri, cJSON_GetObjectItem(track, "uri")->valuestring, 37);
-        (*tracks)[i].artist = strdup(
-                cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "name")->valuestring);
-        sanitize(&(*tracks)[i].artist);
-        memcpy((*tracks)[i].spotify_artist_id,
-               cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(track, "artists"), 0), "id")->valuestring,
-               SPOTIFY_ID_LEN_NULL);
-        (*tracks)[i].artist_escaped = urlencode((*tracks)[i].artist);
-        (*tracks)[i].spotify_album_art = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(
-                cJSON_GetObjectItem(track, "album"), "images"), 0), "url")->valuestring);
-        (*tracks)[i].download_state = DS_NOT_DOWNLOADED;
-        (*tracks)[i].duration_ms = cJSON_GetObjectItem(track, "duration_ms")->valueint;
-        (*tracks)[i].playlist = NULL;
+        if(parse_track_cjson(track, &(*tracks)[i])) continue;
         i++;
     }
+    *track_len = i;
     cJSON_Delete(root);
     return 0;
 }
@@ -933,6 +1068,26 @@ parse_search_json(const char *data, size_t len, void *userp) {
 }
 
 int
+refresh_available_regions(struct spotify_state *spotify) {
+    char req = AVAILABLE_REGIONS;
+    for (int i = 0; i < backend_instance_count; ++i) {
+        struct backend_instance *inst = &backend_instances[i];
+        struct connection *conn = spotify_connect_with_backend(inst, spotify);
+        if (!conn) {
+            inst->disabled = true;
+            fprintf(stderr, "[spotify] Instance '%s' disabled because of failure\n", inst->host);
+            continue;
+        }
+        int ret = make_and_parse_generic_request_with_conn(conn, &req, sizeof(req), parse_available_regions, NULL, inst);
+        if (ret){
+            fprintf(stderr, "[spotify] Instance '%s' disabled because of failure\n", inst->host);
+            inst->disabled = true;
+            continue;
+        }
+    }
+}
+
+int
 add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Track **tracks, size_t *track_size,
                size_t *track_len,
                info_received_cb func) {
@@ -947,9 +1102,9 @@ add_track_info(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], Tra
     userp->tracks = tracks;
     userp->track_len = track_len;
 
-    make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_track_json, func, userp);
+    int ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_track_json, func, userp);
     free(path);
-    return 0;
+    return ret;
 }
 
 int
