@@ -28,11 +28,13 @@ struct backend_sort{
 };
 
 bool
-contains_regions(char *regions, size_t region_count, char *region){
+contains_regions(char *regions, size_t region_count, char *region) {
+    if (!region_count) return true;
     char *ret = regions;
-    while(ret){
-        ret = memchr(ret, region[0], region_count*2-(ret-regions));
-        if (ret && ret[1]==region[1]) return true;
+    while (ret) {
+        ret = memchr(ret, region[0], region_count * 2 - (ret - regions));
+        if (ret && ret[1] == region[1]) return true;
+        if (!ret) break;
         ret++;
     }
     return false;
@@ -380,6 +382,21 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
         if (!data) return; // Not enough data yet
         conn->expecting = *((size_t *) &data[1]);
         if (data[0] != ET_NO_ERROR) { // Error occurred
+            switch (data[0]) {
+                case ET_SPOTIFY:
+                case ET_HTTP:
+                case ET_SPOTIFY_INTERNAL:
+                case ET_NO_ERROR:
+                    break;
+                default: // Unknown error?
+                    fprintf(stderr, "[spotify] Received unknown error code, closing connection (possibly data corruption)\n");
+                    conn->error_buffer = NULL;
+                    conn->error_type = -1;
+                    if (conn->spotify->err_cb) conn->spotify->err_cb(conn, conn->spotify->err_userp);
+                    free_connection(conn);
+                    conn->busy = false;
+                    return;
+            }
             conn->error_buffer = calloc(conn->expecting + 1, sizeof(*conn->error_buffer));
             free(conn->cache_path);
             conn->cache_path = NULL; // Not caching errors
@@ -421,7 +438,6 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
             uint8_t *data = evbuffer_pullup(input, -1);
             fwrite(data, 1, evbuffer_get_length(input), conn->cache_fp);
         }
-        if (conn->cb) conn->cb(bev, conn, conn->cb_arg);
         if (conn->expecting == conn->progress) {
             conn->busy = false;
             if (conn->cache_fp) fclose(conn->cache_fp);
@@ -431,6 +447,7 @@ generic_read_cb(struct bufferevent *bev, void *arg) {
             conn->cache_path = NULL;
             conn->cache_fp = NULL;
         }
+        if (conn->cb) conn->cb(bev, conn, conn->cb_arg);
     }
 }
 
@@ -457,9 +474,9 @@ generic_proxy_cb(struct bufferevent *bev, struct connection *conn, void *arg) {
         }
 
         params->func(buf, conn->progress, params->func_userp);
-        if (params->func1) params->func1(conn->spotify, params->func_userp);
         printf("[spotify] Parsed JSON info\n");
         conn->busy = false;
+        if (params->func1) params->func1(conn->spotify, params->func_userp);
     }
 }
 
@@ -547,52 +564,66 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
 
 int
 read_remote_track(struct spotify_state *spotify, const Track *track, struct buffer *buf) {
-    // Choose best instance based on available regions
-    struct backend_sort scores[backend_instance_count];
-    memset(scores, 0, sizeof(scores));
-    for (int i = 0; i < backend_instance_count; ++i) {
-        uint32_t incl = 0;
-        for (int j = 0; j < backend_instances[i].region_count; ++j) {
-            incl += contains_regions(track->regions, track->region_count, &backend_instances[i].regions[j*2]);
-            if (!scores[i].fmatch) scores[i].fmatch = &backend_instances[i].regions[j*2];
-        }
-        scores[i].inst = &backend_instances[i];
-        scores[i].score = (uint32_t) (((float) incl / (float) backend_instances[i].region_count) * 1000);
-    }
-    qsort(scores, backend_instance_count, sizeof(*scores), backend_sort_comprar);
+    struct connection *conn;
 
-    size_t fzero = backend_instance_count;
-    for (int i = 0; i < backend_instance_count; ++i) {
-        if (scores[i].score == 0) {
-            fzero = i;
-            break;
+    if (track->region_count > 0){
+        // Choose best instance based on available regions
+        struct backend_sort scores[backend_instance_count];
+        memset(scores, 0, sizeof(scores));
+        for (int i = 0; i < backend_instance_count; ++i) {
+            uint32_t incl = 0;
+            for (int j = 0; j < backend_instances[i].region_count; ++j) {
+                incl += contains_regions(track->regions, track->region_count, &backend_instances[i].regions[j * 2]);
+                if (!scores[i].fmatch) scores[i].fmatch = &backend_instances[i].regions[j * 2];
+            }
+            scores[i].inst = &backend_instances[i];
+            scores[i].score = (uint32_t) (((float) incl / (float) backend_instances[i].region_count) * 1000);
         }
-    }
-    if (fzero == 0){
-        fprintf(stderr, "[spotify] No backends with support for any regions of track with id '%s'. Needed one of following regions: ", track->spotify_id);
-        for (int i = 0; i < track->region_count; ++i) {
-            if (i == track->region_count-1)
-                fprintf(stderr, "%.2s\n", &track->regions[i*2]);
-            else
-                fprintf(stderr, "%.2s,", &track->regions[i*2]);
+        qsort(scores, backend_instance_count, sizeof(*scores), backend_sort_comprar);
+
+        size_t fzero = backend_instance_count;
+        for (int i = 0; i < backend_instance_count; ++i) {
+            if (scores[i].score == 0) {
+                fzero = i;
+                break;
+            }
         }
-        return 1;
-    }
-    struct backend_sort *inst = &scores[((uint32_t) (((float)rand()/(float)RAND_MAX)*(float) (fzero / 2 + 1)))];
+        if (fzero == 0) {
+            fprintf(stderr,
+                    "[spotify] No backends with support for any regions of track with id '%s'. Needed one of following regions: ",
+                    track->spotify_id);
+            for (int i = 0; i < track->region_count; ++i) {
+                if (i == track->region_count - 1)
+                    fprintf(stderr, "%.2s\n", &track->regions[i * 2]);
+                else
+                    fprintf(stderr, "%.2s,", &track->regions[i * 2]);
+            }
+            return 1;
+        }
+        struct backend_sort *inst = &scores[((uint32_t) (((float) rand() / (float) RAND_MAX) * (float) (fzero / 2 + 1)))];
+        conn = spotify_connect_with_backend(inst->inst, spotify);
+        if (!conn) return -1;
 
-    struct connection *conn = spotify_connect_with_backend(inst->inst, spotify);
-    if (!conn) return -1;
-
-    conn->payload = malloc(25);
-    conn->payload_len = 25;
-    conn->payload[0] = MUSIC_DATA;
-    memcpy(&conn->payload[1], track->spotify_id, 22); // Payload stored for later in case of error if it has to be resent
-    if (inst->score != 1000){
-        conn->payload[23] = inst->fmatch[0];
-        conn->payload[24] = inst->fmatch[1];
+        conn->payload = malloc(25);
+        conn->payload_len = 25;
+        if (inst->score != 1000) {
+            conn->payload[23] = inst->fmatch[0];
+            conn->payload[24] = inst->fmatch[1];
+        } else {
+            conn->payload[23] = conn->payload[24] = 0;
+        }
     }else{
-        conn->payload[23] = conn->payload[24] = 0;
+        conn = spotify_connect(spotify);
+        if (!conn) return -1;
+
+        conn->payload = malloc(25);
+        conn->payload_len = 25;
     }
+
+
+    conn->payload[0] = MUSIC_DATA;
+    memcpy(&conn->payload[1], track->spotify_id,
+           22); // Payload stored for later in case of error if it has to be resent
 
     conn->progress = 0;
     conn->expecting = 0;
@@ -712,7 +743,6 @@ parse_track_cjson(cJSON *track_json, Track *track){
     char *id = cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "id"));
     if (cJSON_IsTrue(cJSON_GetObjectItem(track_json, "is_local"))) {
         fprintf(stderr, "[spotify] Local spotify tracks cannot be downloaded. (ID: %s)\n", id);
-        cJSON_Delete(track_json);
         return 1;
     }
 

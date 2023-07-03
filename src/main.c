@@ -25,11 +25,23 @@ tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
     printf("[ctrl] Track list loaded\n");
     if (play_track(spotify, &tracks[track_index], &spotify->smp_ctx->audio_buf, NULL)) {
         fprintf(stderr, "[ctrl] Error when trying to play track\n");
+        Action a = {.type = ACTION_POSITION_RELATIVE, .position = 1};
+        write(spotify->smp_ctx->action_fd[1], &a, sizeof(a));
     }
 }
 
 void
 spotify_conn_err(struct connection *conn, void *userp){
+    if (conn->payload){ // Remove possible left over files
+        if (conn->payload[0]==MUSIC_DATA || conn->payload[0]==MUSIC_INFO){
+            char *music_info_path, *music_data_path;
+            track_info_filepath_id(&conn->payload[1], &music_info_path);
+            track_filepath_id(&conn->payload[1], &music_data_path);
+            remove(music_info_path);
+            remove(music_data_path);
+        }
+    }
+
     Action a = {.type = ACTION_POSITION_RELATIVE, .position = 1};
     write(conn->spotify->smp_ctx->action_fd[1], &a, sizeof(a)); // Try playing next track on failure
     printf("[ctrl] Error occurred on connection, trying to play next track\n");
@@ -108,6 +120,8 @@ handle_action(int fd, short what, void *arg) {
                         track_index = 0;
                         if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
                             fprintf(stderr, "[ctrl] Error when trying to play track\n");
+                            Action a1 = {.type = ACTION_POSITION_RELATIVE, .position = 1};
+                            write(ctx->action_fd[1], &a1, sizeof(a1));
                         }
                         break;
                     }
@@ -122,6 +136,8 @@ handle_action(int fd, short what, void *arg) {
             }
             if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
                 fprintf(stderr, "[ctrl] Error when trying to play track\n");
+                Action a1 = {.type = ACTION_POSITION_RELATIVE, .position = 1};
+                write(ctx->action_fd[1], &a1, sizeof(a1));
             }
             break;
         }

@@ -451,10 +451,14 @@ void playlists(int argc, char **argv) {
                 uint32_t playlist_count = 0;
                 if (dbus_client_get_playlist_count(&playlist_count))
                     return;
+                if (playlist_count <= 0){
+                    printf("No playlists saved!\n");
+                    return;
+                }
 
                 relist_playlists:
                 if (index * PLAYLISTS_PER_PAGE >= playlist_count) {
-                    printf("Page index out of range!");
+                    printf("Page index out of range!\n");
                     return;
                 }
 

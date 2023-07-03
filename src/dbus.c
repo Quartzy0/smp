@@ -79,7 +79,7 @@ void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, 
 
 // Adds one string/{type} dictionary entry to dict
 void add_dict_entry(DBusMessageIter *dict, char *attribute, void *attr_value, int type) {
-    add_dict_entry_p(dict, attribute, attr_value ? &attr_value : NULL, type);
+    add_dict_entry_p(dict, attribute, type != DBUS_TYPE_BOOLEAN ? (attr_value ? &attr_value : NULL) : &attr_value, type);
 }
 
 // Adds one string/a{type} dictionary entry to dict

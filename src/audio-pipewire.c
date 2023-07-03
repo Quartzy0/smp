@@ -119,21 +119,29 @@ int init(struct smp_context *ctx, struct buffer *audio_buf) {
 int pause() {
     if (!status) return 0;
     status = false;
-    return pw_stream_set_active(data.stream, false);
+    pw_thread_loop_lock(data.loop);
+    int ret = pw_stream_set_active(data.stream, false);
+    pw_thread_loop_unlock(data.loop);
+    return ret;
 }
 
 int play() {
     if (status) return 0;
     status = true;
-    return pw_stream_set_active(data.stream, true);
+    pw_thread_loop_lock(data.loop);
+    int ret = pw_stream_set_active(data.stream, true);
+    pw_thread_loop_unlock(data.loop);
+    return ret;
 }
 
 int stop() {
     if (!started) return 0;
     status = false;
+    pw_thread_loop_lock(data.loop);
     pw_stream_set_active(data.stream, false);
 
     pw_stream_destroy(data.stream);
+    pw_thread_loop_unlock(data.loop);
     pw_thread_loop_destroy(data.loop);
 
     data.audio_buf->offset = 0;

@@ -178,4 +178,8 @@ int get_all_playlist_info(PlaylistInfo **playlistInfo, size_t *countOut);
 
 void cleanup();
 
+void track_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out);
+
+void track_filepath_id(const char id[SPOTIFY_ID_LEN], char **out);
+
 #endif
