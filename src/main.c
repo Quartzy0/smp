@@ -31,9 +31,9 @@ tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
 }
 
 void
-spotify_conn_err(struct connection *conn, void *userp){
-    if (conn->payload){ // Remove possible left over files
-        if (conn->payload[0]==MUSIC_DATA || conn->payload[0]==MUSIC_INFO){
+spotify_conn_err(struct connection *conn, void *userp) {
+    if (conn->payload) { // Remove possible left over files
+        if (conn->payload[0] == MUSIC_DATA || conn->payload[0] == MUSIC_INFO) {
             char *music_info_path, *music_data_path;
             track_info_filepath_id(&conn->payload[1], &music_info_path);
             track_filepath_id(&conn->payload[1], &music_data_path);
@@ -179,7 +179,8 @@ handle_action(int fd, short what, void *arg) {
         case ACTION_SEARCH: {
             struct search_params *params = malloc(sizeof(*params));
             memcpy(params, &a.search_params, sizeof(*params));
-            search(ctx->spotify, params->query, search_complete_cb, params->tracks, params->artists, params->albums, params->playlists, params);
+            search(ctx->spotify, params->query, search_complete_cb, params->tracks, params->artists, params->albums,
+                   params->playlists, params);
             break;
         }
         case ACTION_NONE: {

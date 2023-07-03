@@ -11,28 +11,28 @@
 #include "util.h"
 #include "spotify.h"
 
-typedef enum PlaybackStatus{
+typedef enum PlaybackStatus {
     PBS_PLAYING,
     PBS_PAUSED,
     PBS_STOPPED
 } PlaybackStatus;
 
-typedef enum PlaylistOrder{
-    ORDER_ALPHABETICAL=0,
+typedef enum PlaylistOrder {
+    ORDER_ALPHABETICAL = 0,
     ORDER_CREATED,
     ORDER_MODIFIED,
     ORDER_PLAYED,
     ORDER_USER
 } PlaylistOrder;
 
-typedef struct DBusPlaylistInfo{
+typedef struct DBusPlaylistInfo {
     bool valid;
     char *id; //DBus object path, not spotify id
     char *name;
     char *icon;
 } DBusPlaylistInfo;
 
-typedef struct Metadata{
+typedef struct Metadata {
     char *track_id;
     int64_t length;
     char *art_url;
@@ -41,7 +41,7 @@ typedef struct Metadata{
     char *url;
 } Metadata;
 
-typedef struct PlayerProperties{
+typedef struct PlayerProperties {
     PlaybackStatus playback_status;
     LoopMode loop_mode;
     bool shuffle;
@@ -84,7 +84,9 @@ int dbus_client_get_tracks_metadata(char **tracks, int count, Metadata *out);
 
 void free_metadata(Metadata *metadata);
 
-int dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out, int *count_out);
+int
+dbus_client_get_playlists(uint32_t index, uint32_t max_count, PlaylistOrder order, bool reverse, DBusPlaylistInfo *out,
+                          int *count_out);
 
 int dbus_client_get_playlist_count(uint32_t *count);
 
@@ -99,8 +101,8 @@ void dbus_client_set_property(const char *iface, const char *name, int type, voi
 int dbus_client_get_property(const char *iface, const char *name, int type, void *value);
 
 int dbus_client_search(bool tracks, bool albums, bool artists, bool playlists, char *query, Track **tracksOut,
-                   size_t *tracks_len, PlaylistInfo **albumsOut, size_t *albums_len, Artist **artistsOut,
-                   size_t *artists_len, PlaylistInfo **playlistsOut, size_t *playlists_len);
+                       size_t *tracks_len, PlaylistInfo **albumsOut, size_t *albums_len, Artist **artistsOut,
+                       size_t *artists_len, PlaylistInfo **playlistsOut, size_t *playlists_len);
 
 void print_properties(FILE *stream, PlayerProperties *properties);
 

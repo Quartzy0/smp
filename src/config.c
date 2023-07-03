@@ -44,8 +44,7 @@ const size_t track_info_path_suffix_len = sizeof(track_info_path_suffix) - 1;
 
 #define cJSON_GetDefault(object, name, type, def) (cJSON_HasObjectItem(object, name) ? cJSON_GetObjectItem(object, name)->value ## type : (def))
 
-void
-get_path_config_value(char **out, cJSON *obj) {
+void get_path_config_value(char **out, cJSON *obj) {
     if (!obj) return;
     char *conf_value = cJSON_GetStringValue(obj);
     size_t conf_value_len = strlen(conf_value);
@@ -58,8 +57,7 @@ get_path_config_value(char **out, cJSON *obj) {
     memcpy(*out, conf_value, conf_value_len);
 }
 
-int
-load_config() {
+int load_config() {
     char *home = getenv("HOME");
     char *cache_home_env = getenv("XDG_CACHE_HOME");
     char *cache_home = NULL;
@@ -190,8 +188,7 @@ load_config() {
     return 0;
 }
 
-void
-clean_config() {
+void clean_config() {
     free(playlist_info_path);
     free(album_info_path);
     free(track_info_path);

@@ -12,7 +12,7 @@ extern Track *tracks;
 extern size_t track_count;
 extern size_t track_size;
 
-void * init_dbus(void *arg);
+void *init_dbus(void *arg);
 
 void handle_message(struct smp_context *ctx);
 

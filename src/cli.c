@@ -451,7 +451,7 @@ void playlists(int argc, char **argv) {
                 uint32_t playlist_count = 0;
                 if (dbus_client_get_playlist_count(&playlist_count))
                     return;
-                if (playlist_count <= 0){
+                if (playlist_count <= 0) {
                     printf("No playlists saved!\n");
                     return;
                 }

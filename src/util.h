@@ -48,7 +48,7 @@ typedef struct Action {
     union {
         char id[23]; // All spotify ids are 22 chars long (track, album and playlist ids) + 1 null byte
         int64_t position;
-        struct search_params{
+        struct search_params {
             bool tracks, artists, albums, playlists;
             char *query;
             DBusMessage *msg;
@@ -61,19 +61,19 @@ struct ArtistQuantity {
     size_t appearances;
 };
 
-struct smp_context{
+struct smp_context {
     struct event_base *base;
     struct event *action_event;
     int action_fd[2];
     int dbus_event_fd[2];
-    struct buffer{
+    struct buffer {
         float *buf;
         size_t size;
         size_t len;
         size_t offset;
     } audio_buf;
     struct spotify_state *spotify;
-    struct audio_info{
+    struct audio_info {
         double volume;
         size_t sample_rate;
         size_t bitrate;
@@ -84,7 +84,7 @@ struct smp_context{
     struct audio_info previous;
 };
 
-struct decode_context{
+struct decode_context {
     enum VorbisDecodeState {
         START,
         HEADERS,

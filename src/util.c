@@ -72,11 +72,11 @@ urlencode(const char *src) {
 ActionType
 id_from_url(const char *src, char *out) {
     char s;
-    if (*src == 'h'){ // e.g. https://open.spotify.com/track/4pQRZ0Pt9VPWtqpYsMvomM ...
+    if (*src == 'h') { // e.g. https://open.spotify.com/track/4pQRZ0Pt9VPWtqpYsMvomM ...
         s = '/';
-    }else if (*src == 's'){ // e.g. spotify:track:4pQRZ0Pt9VPWtqpYsMvomM
+    } else if (*src == 's') { // e.g. spotify:track:4pQRZ0Pt9VPWtqpYsMvomM
         s = ':';
-    }else{
+    } else {
         return ACTION_NONE;
     }
     char *last = strrchr(src, s);
@@ -137,7 +137,7 @@ int compare_artist_quantities(const void *a, const void *b) {
     return (int) (((struct ArtistQuantity *) b)->appearances - ((struct ArtistQuantity *) a)->appearances);
 }
 
-bool str_is_empty(const char *str){
+bool str_is_empty(const char *str) {
     size_t len = strlen(str);
     for (int i = 0; i < len; ++i) {
         if (!isspace(str[i]))return false;
@@ -223,7 +223,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                     info->channels = ctx->vi.channels;
                     info->finished_reading = false;
                     info->total_frames = 0;
-                    if (cb){
+                    if (cb) {
                         cb(info, previous);
                         ctx->cb_called = true;
                     }
@@ -240,8 +240,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
 
             break;
         }
-        case DECODE:
-        {
+        case DECODE: {
             ctx->p = 0;
             size_t buf_len = evbuffer_get_length(in);
             if (!buf_len) return 1;
@@ -283,15 +282,15 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                             (-1.<=range<=1.) to whatever PCM format and write it out */
 
                             while ((samples = vorbis_synthesis_pcmout(&ctx->vd, &pcm)) > 0) {
-                                if (buf_out->size < buf_out->len+samples*ctx->vi.channels){
-                                    float *tmp = realloc(buf_out->buf, (buf_out->size*2)*sizeof(*tmp));
+                                if (buf_out->size < buf_out->len + samples * ctx->vi.channels) {
+                                    float *tmp = realloc(buf_out->buf, (buf_out->size * 2) * sizeof(*tmp));
                                     if (!tmp) perror("error when reallocating audio buffer");
                                     buf_out->buf = tmp;
-                                    buf_out->size = buf_out->size*2;
+                                    buf_out->size = buf_out->size * 2;
                                 }
                                 for (int i = 0; i < samples; ++i) {
                                     for (int j = 0; j < ctx->vi.channels; ++j) {
-                                        buf_out->buf[buf_out->len + i*ctx->vi.channels + j] = pcm[j][i];
+                                        buf_out->buf[buf_out->len + i * ctx->vi.channels + j] = pcm[j][i];
                                     }
                                 }
 
@@ -335,7 +334,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
 }
 
 void
-clean_vorbis_decode(struct decode_context *ctx){
+clean_vorbis_decode(struct decode_context *ctx) {
     if (!ctx) return;
     ctx->state = EOS;
     vorbis_block_clear(&ctx->vb);

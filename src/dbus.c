@@ -79,7 +79,8 @@ void add_dict_entry_p(DBusMessageIter *dict, char *attribute, void *attr_value, 
 
 // Adds one string/{type} dictionary entry to dict
 void add_dict_entry(DBusMessageIter *dict, char *attribute, void *attr_value, int type) {
-    add_dict_entry_p(dict, attribute, type != DBUS_TYPE_BOOLEAN ? (attr_value ? &attr_value : NULL) : &attr_value, type);
+    add_dict_entry_p(dict, attribute, type != DBUS_TYPE_BOOLEAN ? (attr_value ? &attr_value : NULL) : &attr_value,
+                     type);
 }
 
 // Adds one string/a{type} dictionary entry to dict
@@ -384,7 +385,7 @@ void get_mediaplayer_tracklist(DBusMessage *msg, char *property) {
         DBusMessageIter arr_val;
         dbus_message_iter_open_container(&var, DBUS_TYPE_ARRAY, "o", &arr_val);
 
-        if (track_count != -1){
+        if (track_count != -1) {
             static const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
             char *object = malloc(sizeof(base_path) + 22 * sizeof(*object)); //Enough space for ids
             object[sizeof(base_path) + 22 - 1] = 0;
@@ -858,7 +859,8 @@ check_smp_command(DBusMessage *msg, struct smp_context *ctx) {
         dbus_bool_t tracks, albums, artists, playlists;
         char *query;
         if (!dbus_message_get_args(msg, &err, DBUS_TYPE_BOOLEAN, &tracks, DBUS_TYPE_BOOLEAN, &albums, DBUS_TYPE_BOOLEAN,
-                                  &artists, DBUS_TYPE_BOOLEAN, &playlists, DBUS_TYPE_STRING, &query, DBUS_TYPE_INVALID)) {
+                                   &artists, DBUS_TYPE_BOOLEAN, &playlists, DBUS_TYPE_STRING, &query,
+                                   DBUS_TYPE_INVALID)) {
             if (dbus_error_is_set(&err)) {
                 dbus_error_free(&err);
                 fprintf(stderr, "[dbus] Error while decoding arguments: %s\n", err.message);

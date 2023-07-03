@@ -52,7 +52,7 @@ typedef struct Track {
     PlaylistInfo *playlist;
 } Track;
 
-typedef struct Artist{
+typedef struct Artist {
     char spotify_id[SPOTIFY_ID_LEN_NULL];
     char *name;
     uint32_t followers;
@@ -78,7 +78,7 @@ enum error_type {
 };
 struct connection;
 
-struct spotify_search_results{
+struct spotify_search_results {
     bool qtracks, qalbums, qplaylists, qartists;
     Track *tracks;
     size_t track_len;

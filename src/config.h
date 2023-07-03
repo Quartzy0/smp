@@ -20,7 +20,7 @@ extern char *playlist_info_path;
 extern size_t playlist_info_path_len;
 extern double initial_volume;
 
-extern struct backend_instance{
+extern struct backend_instance {
     char *host;
     char *regions;
     size_t region_count;
