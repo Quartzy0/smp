@@ -1,12 +1,13 @@
 # Simple Music Player
 
-# THIS BRANCH IS STILL WIP, MOST FEATURES ARE NOT YET FUNCTIONAL
-
 ### About
 The simple music player is a music player which automatically downloads music from spotify playlists/albums and plays it.
-It was created as an alternative to [spotifyd](https://github.com/Spotifyd/spotifyd). Unlike spotifyd, this music player
-does not register itself as a spotify device and does not play the tracks directly from spotify. Instead, it looks up the
-tracks in a playlist/album and downloads them to your computer from [invidious](https://invidious.io/) (an open source alternative front-end to YouTube).
+It was created as an alternative to [spotifyd](https://github.com/Spotifyd/spotifyd).
+
+In order to get tracks from spotify it makes use of [smp-backend](https://github.com/Quartzy0/smp-backend). The backend
+is what actually fetches data about the tracks, albums and playlists from spotify. It acts as a kind of proxy between
+the client and spotify, which results in the client never having direct contact with spotify.
+
 It is also fully implements the MPRIS DBUS standards, meaning it can be controlled using utilities like [playerctl](https://github.com/altdesktop/playerctl) or [mpris-control](https://github.com/BlackDex/mpris-control).
 
 * [Compiling](#compiling)
