@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include "dbus.h"
 #include "util.h"
 
 extern int status;
@@ -16,7 +17,7 @@ extern int64_t seek;
 
 #define FRAMES_PER_BUFFER   (512)
 
-int init(struct smp_context *ctx, struct buffer *audio_buf);
+int init(struct smp_context *ctx, struct buffer *audio_buf, struct dbus_state *dbus_state);
 
 int start(struct audio_info *info, struct audio_info *previous);
 

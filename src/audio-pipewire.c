@@ -25,6 +25,7 @@ typedef struct Data {
     struct pw_stream *stream;
     struct buffer *audio_buf;
     struct smp_context *ctx;
+    struct dbus_state *dbus_state;
 } Data;
 
 static void on_process(void *userdata) {
@@ -113,10 +114,11 @@ static const struct pw_stream_events stream_events = {
 
 Data data = {0,};
 
-int init(struct smp_context *ctx, struct buffer *audio_buf) {
+int init(struct smp_context *ctx, struct buffer *audio_buf, struct dbus_state *dbus_state) {
     pw_init(NULL, NULL);
     data.ctx = ctx;
     data.audio_buf = audio_buf;
+    data.dbus_state = dbus_state;
     return 0;
 }
 

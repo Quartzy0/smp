@@ -1,0 +1,90 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+        "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node name="/org/mpris/MediaPlayer2">
+    <interface name="org.mpris.MediaPlayer2">
+        <method name="Quit"/>
+
+        <property name="CanQuit" type="b" access="read"/>
+        <property name="Fullscreen" type="b" access="readwrite"/>
+        <property name="CanFullScreen" type="b" access="read"/>
+        <property name="CanRaise" type="b" access="read"/>
+        <property name="HasTrackList" type="b" access="read"/>
+        <property name="Identity" type="s" access="read"/>
+        <property name="SupportedUriSchemes" type="as" access="read"/>
+    </interface>
+    <interface name="org.mpris.MediaPlayer2.Player">
+        <method name="Next"/>
+        <method name="Previous"/>
+        <method name="PlayPause"/>
+        <method name="Pause"/>
+        <method name="Stop"/>
+        <method name="Play"/>
+        <method name="Seek">
+            <arg name="Offset" type="x"/>
+        </method>
+        <method name="SetPosition">
+            <arg name="TrackId" type="o"/>
+            <arg name="Position" type="x"/>
+        </method>
+        <method name="OpenUri">
+            <arg name="Uri" type="s"/>
+        </method>
+
+        <property name="PlaybackStatus" type="s" access="read"/>
+        <property name="LoopStatus" type="s" access="readwrite"/>
+        <property name="Rate" type="d" access="readwrite"/>
+        <property name="Shuffle" type="b" access="readwrite"/>
+        <property name="Metadata" type="a{sv}" access="read"/>
+        <property name="Volume" type="d" access="readwrite"/>
+        <property name="Position" type="x" access="read"/>
+        <property name="MinimumRate" type="d" access="read"/>
+        <property name="MaximumRate" type="d" access="read"/>
+        <property name="CanGoNext" type="b" access="read"/>
+        <property name="CanGoPrevious" type="b" access="read"/>
+        <property name="CanPlay" type="b" access="read"/>
+        <property name="CanPause" type="b" access="read"/>
+        <property name="CanSeek" type="b" access="read"/>
+        <property name="CanControl" type="b" access="read"/>
+    </interface>
+    <interface name="org.mpris.MediaPlayer2.Playlists">
+        <method name="GetPlaylists">
+            <arg name="Index" type="u"/>
+            <arg name="MaxCount" type="u"/>
+            <arg name="Order" type="s"/>
+            <arg name="ReverseOrder" type="b"/>
+
+            <arg name="Playlists" type="a(oss)" direction="out"/>
+        </method>
+        <method name="ActivatePlaylist">
+            <arg name="PlaylistId" type="o"/>
+        </method>
+
+        <property name="PlaylistCount" type="u" access="read"/>
+        <property name="Orderings" type="as" access="read"/>
+        <property name="ActivePlaylist" type="(b(oss))" access="read"/>
+    </interface>
+    <interface name="org.mpris.MediaPlayer2.TrackList">
+        <method name="Goto">
+            <arg name="TrackId" type="o"/>
+        </method>
+        <method name="GetTracksMetadata">
+            <arg name="TrackIds" type="ao"/>
+
+            <arg name="Metadata" type="aa{sv}" direction="out"/>
+        </method>
+
+        <property name="Tracks" type="ao" access="read"/>
+        <property name="CanEditTracks" type="b" access="read"/>
+    </interface>
+    <interface name="me.quartzy.smp">
+        <method name="Search">
+            <arg name="Tracks" type="b"/>
+            <arg name="Albums" type="b"/>
+            <arg name="Artists" type="b"/>
+            <arg name="Playlists" type="b"/>
+            <arg name="Query" type="s"/>
+
+            <arg name="Output" type="(ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))"/>
+        </method>
+    </interface>
+</node>

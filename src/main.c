@@ -179,7 +179,7 @@ handle_action(int fd, short what, void *arg) {
         case ACTION_SEARCH: {
             struct search_params *params = malloc(sizeof(*params));
             memcpy(params, &a.search_params, sizeof(*params));
-            search(ctx->spotify, params->query, search_complete_cb, params->tracks, params->artists, params->albums,
+            search(ctx->spotify, params->query, handle_search_response, params->tracks, params->artists, params->albums,
                    params->playlists, params);
             break;
         }
@@ -187,6 +187,12 @@ handle_action(int fd, short what, void *arg) {
             break;
         }
     }
+}
+
+void
+dbus_poll(int fd, short what, void *arg){
+    struct dbus_state *dbus_state = (struct dbus_state*) arg;
+    handle_message(dbus_state->bus);
 }
 
 int main(int argc, char **argv) {
@@ -214,7 +220,6 @@ int main(int argc, char **argv) {
     memset(&ctx.audio_buf, 0, sizeof(ctx.audio_buf));
     ctx.audio_buf.buf = calloc(12000000, sizeof(*ctx.audio_buf.buf));
     ctx.audio_buf.size = 12000000;
-    init(&ctx, &ctx.audio_buf);
 
     pipe(ctx.action_fd);
 
@@ -227,21 +232,19 @@ int main(int argc, char **argv) {
     }
     event_add(ctx.action_event, NULL);
 
-    pthread_t dbus_thread = 0;
-    int err = pthread_create(&dbus_thread, NULL, &init_dbus, &ctx);
-    if (err) {
-        fprintf(stderr, "[ctrl] Error occurred while trying to create downloader thread: %s\n", strerror(errno));
-        return EXIT_FAILURE;
-    }
+    struct dbus_state *dbus_state = init_dbus(&ctx);
+    struct event *dbus_polling = event_new(ctx.base, -1, EV_PERSIST, dbus_poll, dbus_state);
+    struct timeval tv = {
+            .tv_sec = 0,
+            .tv_usec = 50000,
+    };
+    event_add(dbus_polling, &tv);
+
+    init(&ctx, &ctx.audio_buf, dbus_state);
 
     refresh_available_regions(&state);
 
     event_base_dispatch(ctx.base);
-
-    err = pthread_join(dbus_thread, NULL);
-    if (err) {
-        fprintf(stderr, "[ctrl] Error occurred while trying to wait for control thread to exit: %s\n", strerror(errno));
-    }
 
     clean_audio();
     cleanup();
@@ -255,6 +258,8 @@ int main(int argc, char **argv) {
     clear_tracks(tracks, &track_count, &track_size);
     close(ctx.action_fd[0]);
     close(ctx.action_fd[1]);
+    dbus_util_free_bus(dbus_state->bus);
+    free(dbus_state);
 
     return EXIT_SUCCESS;
 }

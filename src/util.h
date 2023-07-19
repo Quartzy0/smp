@@ -8,6 +8,7 @@
 #include <event2/bufferevent.h>
 #include <time.h>
 #include <dbus/dbus.h>
+#include "dbus-util.h"
 
 #define TIMER_START(name) clock_t __gen_timer_ ##name = clock()
 #define TIMER_END(name) printf("Timer '" #name "' took %2.f ms\n", (double) (clock()-__gen_timer_##name) / (double) CLOCKS_PER_SEC * 1000.0)
@@ -51,7 +52,8 @@ typedef struct Action {
         struct search_params {
             bool tracks, artists, albums, playlists;
             char *query;
-            DBusMessage *msg;
+            dbus_method_call *call;
+            dbus_bus *bus;
         } search_params;
     };
 } Action;

@@ -1,3 +1,6 @@
 [submodule "lib/cjson"]
 	path = lib/cjson
 	url = https://github.com/DaveGamble/cJSON
+[submodule "lib/dbus-util"]
+	path = lib/dbus-util
+	url = https://github.com/Quartzy0/dbus-util

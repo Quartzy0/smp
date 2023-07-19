@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.16.0)
 
 project(smp C)
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -39,6 +39,14 @@ set(CJSON_BUILD_SHARED_LIBS false)
 set(BUILD_SHARED_LIBS false)
 add_subdirectory(lib/cjson EXCLUDE_FROM_ALL)
 
+add_subdirectory(lib/dbus-util)
+
+include(cmake/FileEmbed.cmake)
+FileEmbedSetup()
+FileEmbedAdd(${CMAKE_SOURCE_DIR}/src/introspection.xml)
+
+target_link_libraries(smp file_embed)
+target_link_libraries(smp dbus_util)
 target_link_libraries(smp cjson)
 target_link_libraries(smp CURL::libcurl)
 target_link_libraries(smp dbus-1)
