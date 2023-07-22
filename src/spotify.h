@@ -139,9 +139,9 @@ struct spotify_state {
 
 void clear_tracks(Track *tracks, size_t *track_len, size_t *track_size);
 
-int play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, char *region);
+struct connection * play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, char *region);
 
-int ensure_track(struct spotify_state *spotify, const Track *track, char *region);
+struct connection * ensure_track(struct spotify_state *spotify, const Track *track, char *region);
 
 int refresh_available_regions(struct spotify_state *spotify);
 
@@ -181,5 +181,7 @@ void cleanup();
 void track_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out);
 
 void track_filepath_id(const char id[SPOTIFY_ID_LEN], char **out);
+
+void cancel_track_transfer(struct connection *conn);
 
 #endif

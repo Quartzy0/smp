@@ -80,6 +80,11 @@ id_from_url(const char *src, char *out) {
         return ACTION_NONE;
     }
     char *last = strrchr(src, s);
+    if (!last) return ACTION_NONE;
+    if (strlen(last + 1) < SPOTIFY_ID_LEN) return ACTION_NONE;
+    for (int i = 0; i < SPOTIFY_ID_LEN; ++i) {
+        if (!isalnum(last[1+i])) return ACTION_NONE;
+    }
     memcpy(out, last + 1, SPOTIFY_ID_LEN);
     out[SPOTIFY_ID_LEN] = 0;
     switch (*(last - 1)) {
@@ -343,4 +348,5 @@ clean_vorbis_decode(struct decode_context *ctx) {
     vorbis_comment_clear(&ctx->vc);
     vorbis_info_clear(&ctx->vi);
     ogg_sync_clear(&ctx->oy);
+    memset(ctx, 0, sizeof(*ctx));
 }

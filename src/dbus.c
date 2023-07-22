@@ -319,6 +319,10 @@ static void OpenUri_cb(dbus_bus *bus, dbus_object *object, dbus_interface *inter
     if (dbus_util_get_method_arguments(bus, call, DBUS_TYPE_STRING, &uri, DBUS_TYPE_INVALID)) return;
 
     Action a = {.type = id_from_url(uri, a.id)};
+    if (a.type == ACTION_NONE){ // id was invalid
+        dbus_util_send_error_reply(call, "Invalid id!");
+        return;
+    }
     write(ctx->action_fd[1], &a, sizeof(a));
 
     dbus_util_send_empty_reply(call);

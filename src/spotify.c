@@ -557,7 +557,7 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
                        &conn->spotify->smp_ctx->audio_info, &conn->spotify->smp_ctx->previous,
                        (audio_info_cb) start)) { // Stream is over
         conn->busy = false;
-        memset(&conn->spotify->decode_ctx, 0, sizeof(conn->spotify->decode_ctx));
+        clean_vorbis_decode(&conn->spotify->decode_ctx);
         printf("[spotify] End of stream\n");
     }
     if (conn->expecting == conn->progress) {
@@ -565,7 +565,7 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
     }
 }
 
-int
+struct connection *
 read_remote_track(struct spotify_state *spotify, const Track *track, struct buffer *buf) {
     struct connection *conn;
 
@@ -601,11 +601,11 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
                 else
                     fprintf(stderr, "%.2s,", &track->regions[i * 2]);
             }
-            return 1;
+            return NULL;
         }
         struct backend_sort *inst = &scores[((uint32_t) (((float) rand() / (float) RAND_MAX) * (float) (fzero / 2 + 1)))];
         conn = spotify_connect_with_backend(inst->inst, spotify);
-        if (!conn) return -1;
+        if (!conn) return NULL;
 
         conn->payload = malloc(25);
         conn->payload_len = 25;
@@ -617,7 +617,7 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
         }
     }else{
         conn = spotify_connect(spotify);
-        if (!conn) return -1;
+        if (!conn) return NULL;
 
         conn->payload = malloc(25);
         conn->payload_len = 25;
@@ -645,9 +645,9 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
     }
     track_filepath_id(track->spotify_id, &conn->cache_path);
 
-    if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return -1;
+    if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return NULL;
     bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
-    return 0;
+    return conn;
 }
 
 int
@@ -695,23 +695,23 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
     return 1;
 }
 
-int
+struct connection *
 play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, char *region) {
-    if (!spotify || !track || !buf) return 1;
-    memset(&spotify->decode_ctx, 0, sizeof(spotify->decode_ctx));
+    if (!spotify || !track || !buf) return NULL;
+    clean_vorbis_decode(&spotify->decode_ctx);
     if (read_local_track(spotify, track->spotify_id, buf))
         return read_remote_track(spotify, track, buf); // TODO: Handle audio corruption on remote track
-    return 0;
+    return NULL;
 }
 
-int
+struct connection *
 ensure_track(struct spotify_state *spotify, const Track *track, char *region) {
-    if (!spotify || !track) return 1;
+    if (!spotify || !track) return NULL;
     char *path = NULL;
     track_filepath_id(track->spotify_id, &path);
     if (!access(path, R_OK)) {
         free(path);
-        return 0;
+        return NULL;
     }
     free(path);
     return read_remote_track(spotify, track, NULL);
@@ -1248,4 +1248,24 @@ search(struct spotify_state *spotify, const char *query, info_received_cb cb, bo
     userp->userp = userp_in;
 
     return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_search_json, cb, userp);
+}
+
+void
+cancel_track_transfer(struct connection *conn){
+    if (!conn || !conn->busy || conn->payload[0] != MUSIC_DATA) return;
+    conn->cb = NULL;
+    conn->cb_arg = NULL;
+
+    double done_percentage = ((double) conn->progress)/((double) conn->expecting);
+    if (done_percentage < 0.75){
+        fclose(conn->cache_fp);
+        conn->cache_fp = NULL;
+        remove(conn->cache_path);
+        free_connection(conn);
+        bufferevent_free(conn->bev);
+        conn->bev = NULL;
+        printf("Closing download\n");
+    } else{
+        printf("Leaving download\n");
+    }
 }

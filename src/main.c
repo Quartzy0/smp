@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <string.h>
-#include <errno.h>
 #include <stdlib.h>
 #include "spotify.h"
 #include "audio.h"
@@ -18,16 +17,16 @@ size_t track_count = -1;
 size_t track_size = -1;
 Track *next_tracks = NULL;
 size_t next_track_count = 0;
+bool recommendations_loading = false;
+struct connection *currently_streaming;
 
 void
 tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
     if (userp) free(userp);
+    recommendations_loading = false;
     printf("[ctrl] Track list loaded\n");
-    if (play_track(spotify, &tracks[track_index], &spotify->smp_ctx->audio_buf, NULL)) {
-        fprintf(stderr, "[ctrl] Error when trying to play track\n");
-        Action a = {.type = ACTION_POSITION_RELATIVE, .position = 1};
-        write(spotify->smp_ctx->action_fd[1], &a, sizeof(a));
-    }
+    cancel_track_transfer(currently_streaming);
+    currently_streaming = play_track(spotify, &tracks[track_index], &spotify->smp_ctx->audio_buf, NULL);
 }
 
 void
@@ -126,9 +125,12 @@ handle_action(int fd, short what, void *arg) {
                         break;
                     }
                     //Continue playing recommendations
-                    add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count,
+                    if(!recommendations_loading) {
+                        recommendations_loading = true;
+                        add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count,
                                                     tracks_loaded_cb);
-                    track_index++;
+                    }
+                    track_index += a.position;
                     break;
                 } else {
                     track_index += a.position;
