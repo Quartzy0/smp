@@ -5,7 +5,6 @@
 #include "dbus.h"
 #include <dbus/dbus.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <dbus-util.h>
@@ -13,13 +12,34 @@
 #include "util.h"
 #include "spotify.h"
 #include "introspection_xml.h"
+#include "ctrl.h"
 
 #define CHECKERR(x) do{int ret = (x);if(ret != 0){printf("Assert fail in %s:%d with %d\n", __FILE__, __LINE__, ret);dbus_util_free_bus(dbus_state->bus);exit(1);}}while(0)
 
 static const char mpris_name[] = "org.mpris.MediaPlayer2.smp";
 
-static void add_track_metadata(dbus_message_context *ctx, Track *track){
-    if (!track || !started){
+static int
+compare_alphabetical(const void *a, const void *b) {
+    return strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
+}
+
+static int
+compare_alphabetical_reverse(const void *a, const void *b) {
+    return -strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
+}
+
+static int
+compare_last_played(const void *a, const void *b) {
+    return (int) (((const PlaylistInfo *) b)->last_played - ((const PlaylistInfo *) a)->last_played);
+}
+
+static int
+compare_last_played_reverse(const void *a, const void *b) {
+    return (int) (((const PlaylistInfo *) a)->last_played - ((const PlaylistInfo *) b)->last_played);
+}
+
+static void add_track_metadata(struct audio_context *audio_ctx, dbus_message_context *ctx, Track *track) {
+    if (!track || !audio_started(audio_ctx)){
         dbus_util_message_context_enter_array(&ctx, "{sv}");
         dbus_util_message_context_exit_array(&ctx);
         return;
@@ -105,19 +125,26 @@ static void SupportedUriSchemes_cb(dbus_bus *bus, dbus_message_context *ctx, voi
 }
 
 static void Metadata_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    struct spotify_state *spotify = ctrl_get_spotify_state(smp_ctx);
+    struct audio_context *audio_ctx = ctrl_get_audio_context(smp_ctx);
     dbus_util_message_context_enter_variant(&ctx, "a{sv}");
-    add_track_metadata(ctx, &tracks[track_index]);
+    add_track_metadata(audio_ctx, ctx, &spotify->tracks[ctrl_get_track_index(smp_ctx)]);
     dbus_util_message_context_exit_variant(&ctx);
 }
 
 static void Volume_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
-    dbus_util_message_context_add_double_variant(ctx, volume);
+    struct audio_context *audio_ctx = ctrl_get_audio_context(param);
+    dbus_util_message_context_add_double_variant(ctx, audio_get_volume(audio_ctx));
 }
 
 static void Volume_set_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
+    struct audio_context *audio_ctx = ctrl_get_audio_context(param);
+    double volume;
     dbus_util_message_context_enter_variant(&ctx, "a{sv}");
     dbus_util_message_context_get_double(ctx, &volume);
     dbus_util_message_context_exit_variant(&ctx);
+    audio_set_volume(audio_ctx, volume);
 }
 
 static void Orderings_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
@@ -130,29 +157,35 @@ static void Orderings_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) 
 }
 
 static void ActivePlaylist_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    struct spotify_state *spotify = ctrl_get_spotify_state(smp_ctx);
+    struct audio_context *audio_ctx = ctrl_get_audio_context(smp_ctx);
     dbus_util_message_context_enter_variant(&ctx, "(b(oss))");
     dbus_util_message_context_enter_struct(&ctx);
 
-    bool value = started && tracks[0].playlist && tracks[0].playlist->not_empty;
+    bool value = audio_started(audio_ctx) && spotify->tracks[0].playlist && spotify->tracks[0].playlist->not_empty;
     dbus_util_message_context_add_bool(ctx, value);
 
-    add_playlist_dbus(ctx, value ? tracks[0].playlist : NULL);
+    add_playlist_dbus(ctx, value ? spotify->tracks[0].playlist : NULL);
 
     dbus_util_message_context_exit_struct(&ctx);
     dbus_util_message_context_exit_variant(&ctx);
 }
 
 static void Tracks_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    struct spotify_state *spotify = ctrl_get_spotify_state(smp_ctx);
+
     dbus_util_message_context_enter_variant(&ctx, "ao");
     dbus_util_message_context_enter_array(&ctx, "o");
 
-    if (track_count != -1) {
+    if (spotify->track_count != -1) {
         static const char base_path[] = "/org/mpris/MediaPlayer2/smp/track/";
         char *object = malloc(sizeof(base_path) + 22 * sizeof(*object)); //Enough space for ids
         object[sizeof(base_path) + 22 - 1] = 0;
         memcpy(object, base_path, sizeof(base_path) - 1);
-        for (int i = 0; i < track_count; ++i) {
-            memcpy(object + sizeof(base_path) - 1, tracks[i].spotify_id, 22);
+        for (int i = 0; i < spotify->track_count; ++i) {
+            memcpy(object + sizeof(base_path) - 1, spotify->tracks[i].spotify_id, 22);
             dbus_util_message_context_add_object_path(ctx, object);
         }
         free(object);
@@ -163,7 +196,8 @@ static void Tracks_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
 }
 
 static void PlaybackStatus_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
-    dbus_util_message_context_add_string_variant(ctx, started ? (status ? "Playing" : "Paused") : "Stopped");
+    struct audio_context *audio_ctx = ctrl_get_audio_context(param);
+    dbus_util_message_context_add_string_variant(ctx, audio_started(audio_ctx) ? (audio_playing(audio_ctx) ? "Playing" : "Paused") : "Stopped");
 }
 
 static void LoopStatus_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
@@ -215,9 +249,7 @@ static void Shuffle_set_cb(dbus_bus *bus, dbus_message_context *ctx, void *param
 
 static void Position_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
     struct smp_context *smp_ctx = (struct smp_context*) param;
-    int64_t position = (int64_t) (((double) smp_ctx->audio_buf.offset / (double) smp_ctx->audio_info.sample_rate) *
-                                  1000000.0);
-    dbus_util_message_context_add_int64_variant(ctx, position);
+    dbus_util_message_context_add_int64_variant(ctx, audio_get_position(ctrl_get_audio_context(smp_ctx)));
 }
 
 /*      Methods         */
@@ -225,8 +257,7 @@ static void Position_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
 static void Quit_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_QUIT};
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_quit(ctx);
 
     dbus_util_send_empty_reply(call);
 }
@@ -234,9 +265,7 @@ static void Quit_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
 static void Next_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                         void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_POSITION_RELATIVE};
-    a.position = 1;
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_change_track_index(ctx, 1);
 
     dbus_util_send_empty_reply(call);
 }
@@ -244,9 +273,7 @@ static void Next_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
 static void Previous_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_POSITION_RELATIVE};
-    a.position = -1;
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_change_track_index(ctx, -1);
 
     dbus_util_send_empty_reply(call);
 }
@@ -254,8 +281,7 @@ static void Previous_cb(dbus_bus *bus, dbus_object *object, dbus_interface *inte
 static void PlayPause_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_PLAYPAUSE};
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_playpause(ctx);
 
     dbus_util_send_empty_reply(call);
 }
@@ -263,8 +289,7 @@ static void PlayPause_cb(dbus_bus *bus, dbus_object *object, dbus_interface *int
 static void Pause_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_PAUSE};
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_pause(ctx);
 
     dbus_util_send_empty_reply(call);
 }
@@ -272,8 +297,7 @@ static void Pause_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfa
 static void Stop_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_STOP};
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_stop(ctx);
 
     dbus_util_send_empty_reply(call);
 }
@@ -281,8 +305,7 @@ static void Stop_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
 static void Play_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_PLAY};
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_play(ctx);
 
     dbus_util_send_empty_reply(call);
 }
@@ -290,12 +313,12 @@ static void Play_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
 static void Seek_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_SEEK};
+    int64_t pos;
     dbus_message_context *rctx = dbus_util_make_read_context(call);
-    dbus_util_message_context_get_int64(rctx, &a.position);
+    dbus_util_message_context_get_int64(rctx, &pos);
     dbus_util_message_context_free(rctx);
 
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_seek(ctx, pos);
 
     dbus_util_send_empty_reply(call);
 }
@@ -303,11 +326,12 @@ static void Seek_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
 static void SetPosition_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
-    Action a = {.type = ACTION_SET_POSITION};
+    int64_t pos;
     dbus_message_context *rctx = dbus_util_make_read_context(call);
-    dbus_util_message_context_get_int64(rctx, &a.position);
+    dbus_util_message_context_get_int64(rctx, &pos);
     dbus_util_message_context_free(rctx);
-    write(ctx->action_fd[1], &a, sizeof(a));
+
+    ctrl_seek_to(ctx, pos);
 
     dbus_util_send_empty_reply(call);
 }
@@ -318,12 +342,7 @@ static void OpenUri_cb(dbus_bus *bus, dbus_object *object, dbus_interface *inter
     const char *uri = NULL;
     if (dbus_util_get_method_arguments(bus, call, DBUS_TYPE_STRING, &uri, DBUS_TYPE_INVALID)) return;
 
-    Action a = {.type = id_from_url(uri, a.id)};
-    if (a.type == ACTION_NONE){ // id was invalid
-        dbus_util_send_error_reply(call, "Invalid id!");
-        return;
-    }
-    write(ctx->action_fd[1], &a, sizeof(a));
+    ctrl_play_uri(ctx, uri);
 
     dbus_util_send_empty_reply(call);
 }
@@ -374,10 +393,12 @@ static void ActivatePlaylist_cb(dbus_bus *bus, dbus_object *object, dbus_interfa
         return;
 
     size_t objLen = strlen(obj);
-    Action a = {.type = obj[objLen - 1] == 'a' ? ACTION_ALBUM : ACTION_PLAYLIST};
-    memcpy(a.id, &obj[objLen - 23], 22 * sizeof(char));
-    a.id[SPOTIFY_ID_LEN] = 0;
-    write(ctx->action_fd[1], &a, sizeof(a));
+
+    if (obj[objLen - 1] == 'a'){
+        ctrl_play_album(ctx, &obj[objLen - 23]);
+    } else{
+        ctrl_play_playlist(ctx, &obj[objLen - 23]);
+    }
 
     dbus_util_send_empty_reply(call);
 }
@@ -390,29 +411,32 @@ static void Goto_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interfac
     if (dbus_util_get_method_arguments(bus, call, DBUS_TYPE_OBJECT_PATH, &obj, DBUS_TYPE_INVALID))
         return;
 
-    for (size_t i = 0; i < track_count; ++i) {
+    struct spotify_state *spotify = ctrl_get_spotify_state(ctx);
+    for (int32_t i = 0; i < spotify->track_count; ++i) {
         const char *id = strrchr(obj, '/');
-        if (!id || strcmp(++id, tracks[i].spotify_id) != 0)continue;
-        Action a = {.type = ACTION_POSITION_RELATIVE, .position = (int64_t) i};
-        write(ctx->action_fd[1], &a, sizeof(a));
+        if (!id || strcmp(++id, spotify->tracks[i].spotify_id) != 0)continue;
+        ctrl_set_track_index(ctx, i);
         break;
     }
 }
 
 static void GetTracksMetadata_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interface, dbus_method_call *call,
                     void *param){
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    struct audio_context *audio_ctx = ctrl_get_audio_context(param);
     size_t len = 20;
     char **objs = NULL;
     if (dbus_util_get_method_arguments(bus, call, DBUS_TYPE_ARRAY, DBUS_TYPE_OBJECT_PATH, &objs, &len, DBUS_TYPE_INVALID))
         return;
+    struct spotify_state *spotify = ctrl_get_spotify_state(smp_ctx);
 
     dbus_message_context *ctx = dbus_util_make_reply_context(call);
     dbus_util_message_context_enter_array(&ctx, "a{sv}");
     const size_t id_offset = strrchr(objs[0], '/') - objs[0] + 1;
-    for (size_t i = 0; i < track_count; ++i) {
+    for (size_t i = 0; i < spotify->track_count; ++i) {
         for (size_t j = 0; j < len; ++j) {
-            if (strcmp(objs[j] + id_offset, tracks[i].spotify_id) != 0)continue;
-            add_track_metadata(ctx, &tracks[i]);
+            if (strcmp(objs[j] + id_offset, spotify->tracks[i].spotify_id) != 0)continue;
+            add_track_metadata(audio_ctx, ctx, &spotify->tracks[i]);
         }
     }
     dbus_util_message_context_exit_array(&ctx);
@@ -431,18 +455,20 @@ static void Search_cb(dbus_bus *bus, dbus_object *object, dbus_interface *interf
                                DBUS_TYPE_INVALID)) {
         return;
     }
-    Action a = {.type = ACTION_SEARCH, .search_params = {.tracks = tracks, .artists = artists, .albums = albums, .playlists = playlists}};
-    a.search_params.query = strdup(query);
-    a.search_params.call = dbus_util_make_reply_call(call);
-    a.search_params.bus = bus;
-    write(ctx->action_fd[1], &a, sizeof(a));
+    struct search_params *params = malloc(sizeof(*params));
+    params->tracks = tracks;
+    params->artists = artists;
+    params->albums = albums;
+    params->playlists = playlists;
+    params->query = strdup(query);
+    params->call = dbus_util_make_reply_call(call);
+    params->bus = bus;
+    ctrl_search(ctx, params);
 }
 
 struct dbus_state *
 init_dbus(struct smp_context *ctx) {
     struct dbus_state *dbus_state = malloc(sizeof(*dbus_state));
-
-    pipe(ctx->dbus_event_fd);
 
     CHECKERR(dbus_util_create_bus_with_name(&dbus_state->bus, mpris_name));
     CHECKERR(dbus_util_set_introspectable_xml(dbus_state->bus, (const char *) introspection_xml_data));
@@ -469,9 +495,9 @@ init_dbus(struct smp_context *ctx) {
     dbus_util_set_property_cb(dbus_state->mplayer_iface, "PlaybackStatus", PlaybackStatus_cb, NULL, ctx);
     dbus_util_set_property_cb(dbus_state->mplayer_iface, "LoopStatus", LoopStatus_cb, LoopStatus_set_cb, ctx);
     dbus_util_set_property_double(dbus_state->mplayer_iface, "Rate", 1.0);
-    dbus_util_set_property_cb(dbus_state->mplayer_iface, "Shuffle", Shuffle_cb, Shuffle_set_cb, NULL);
+    dbus_util_set_property_cb(dbus_state->mplayer_iface, "Shuffle", Shuffle_cb, Shuffle_set_cb, ctx);
     dbus_util_set_property_cb(dbus_state->mplayer_iface, "Metadata", Metadata_cb, NULL, ctx);
-    dbus_util_set_property_cb(dbus_state->mplayer_iface, "Volume", Volume_cb, Volume_set_cb, NULL);
+    dbus_util_set_property_cb(dbus_state->mplayer_iface, "Volume", Volume_cb, Volume_set_cb, ctx);
     dbus_util_set_property_cb(dbus_state->mplayer_iface, "Position", Position_cb, NULL, ctx);
     dbus_util_set_property_double(dbus_state->mplayer_iface, "MinimumRate", 1.0);
     dbus_util_set_property_double(dbus_state->mplayer_iface, "MaximumRate", 1.0);
@@ -574,9 +600,7 @@ dbus_add_artist(Artist *artist, dbus_message_context *ctx) {
 }
 
 void
-handle_search_response(struct spotify_state *spotify,
-                       void *userp) { // Return signature: (ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))
-    struct spotify_search_results *results = (struct spotify_search_results *) userp;
+handle_search_response(struct spotify_search_results *results) { // Return signature: (ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))
     struct search_params *params = (struct search_params *) results->userp;
 
     dbus_message_context *ctx = dbus_util_make_write_context(params->call);

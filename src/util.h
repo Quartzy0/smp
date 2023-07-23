@@ -13,10 +13,12 @@
 #define TIMER_START(name) clock_t __gen_timer_ ##name = clock()
 #define TIMER_END(name) printf("Timer '" #name "' took %2.f ms\n", (double) (clock()-__gen_timer_##name) / (double) CLOCKS_PER_SEC * 1000.0)
 
-typedef struct Response {
-    char *data;
-    unsigned int size;
-} Response;
+struct buffer {
+    float *buf;
+    size_t size;
+    size_t len;
+    size_t offset;
+};
 
 typedef enum LoopMode {
     LOOP_MODE_NONE = 0,
@@ -25,65 +27,11 @@ typedef enum LoopMode {
     LOOP_MODE_LAST
 } LoopMode;
 
-typedef enum ActionType {
-    ACTION_NONE,
-    ACTION_PLAY,
-    ACTION_PAUSE,
-    ACTION_PLAYPAUSE,
-    ACTION_STOP,
-    ACTION_QUIT,
-    ACTION_PLAYLIST,
-    ACTION_TRACK,
-    ACTION_ALBUM,
-    ACTION_POSITION_RELATIVE,
-    ACTION_POSITION_ABSOLUTE,
-    ACTION_TRACK_OVER,
-    ACTION_SEEK,
-    ACTION_SET_POSITION,
-    ACTION_SEARCH,
-} ActionType;
-
-//6yKMo95JkibE9tGN81dgFh
-typedef struct Action {
-    ActionType type;
-    union {
-        char id[23]; // All spotify ids are 22 chars long (track, album and playlist ids) + 1 null byte
-        int64_t position;
-        struct search_params {
-            bool tracks, artists, albums, playlists;
-            char *query;
-            dbus_method_call *call;
-            dbus_bus *bus;
-        } search_params;
-    };
-} Action;
-
-struct ArtistQuantity {
-    char id[23];
-    size_t appearances;
-};
-
-struct smp_context {
-    struct event_base *base;
-    struct event *action_event;
-    int action_fd[2];
-    int dbus_event_fd[2];
-    struct buffer {
-        float *buf;
-        size_t size;
-        size_t len;
-        size_t offset;
-    } audio_buf;
-    struct spotify_state *spotify;
-    struct audio_info {
-        double volume;
-        size_t sample_rate;
-        size_t bitrate;
-        size_t total_frames;
-        int channels;
-        bool finished_reading;
-    } audio_info;
-    struct audio_info previous;
+enum UriType{
+    URI_INVALID = 0,
+    URI_TRACK = 1,
+    URI_ALBUM = 2,
+    URI_PLAYLIST = 3,
 };
 
 struct decode_context {
@@ -109,13 +57,12 @@ struct decode_context {
     int zero_count;
     bool cb_called;
 };
+struct audio_info;
 
-typedef void(*audio_info_cb)(struct audio_info *info, struct audio_info *previous);
+typedef void(*audio_info_cb)(void *userp, struct audio_info *info, struct audio_info *previous);
 
 extern LoopMode loop_mode;
 extern bool shuffle;
-
-int read_url(const char *url, Response *response, struct curl_slist *headers);
 
 #ifndef VEC_STEP
 #define VEC_STEP 10
@@ -124,32 +71,20 @@ int read_url(const char *url, Response *response, struct curl_slist *headers);
 // https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
 char *urlencode(const char *src);
 
-void clean_encode_curl();
-
-ActionType id_from_url(const char *src, char *out);
+enum UriType id_from_url(const char *src, char *out);
 
 void sanitize(char **in);
-
-int compare_alphabetical(const void *a, const void *b);
-
-int compare_alphabetical_reverse(const void *a, const void *b);
-
-int compare_last_played(const void *a, const void *b);
-
-int compare_last_played_reverse(const void *a, const void *b);
-
-int compare_artist_quantities(const void *a, const void *b);
 
 bool str_is_empty(const char *str);
 
 //https://stackoverflow.com/a/49028514
-void rek_mkdir(const char *path);
+int rek_mkdir(const char *path);
 
 FILE *fopen_mkdir(const char *path, char *mode);
 
 int
 decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context *ctx, size_t *progress,
-              struct audio_info *info, struct audio_info *previous, audio_info_cb cb);
+              struct audio_info *info, struct audio_info *previous, audio_info_cb cb, void *userp);
 
 void
 clean_vorbis_decode(struct decode_context *ctx);

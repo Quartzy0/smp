@@ -6,62 +6,10 @@
 #include <errno.h>
 #include <ctype.h>
 #include "spotify.h"
+#include "audio.h"
 
 LoopMode loop_mode = LOOP_MODE_NONE;
 bool shuffle = false;
-
-static size_t
-curl_easy_write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t realsize = size * nmemb;
-    Response **mem = (Response **) userp;
-
-    char *ptr = realloc((*mem)->data, (*mem)->size + realsize + 1);
-    if (!ptr) {
-        /* out of memory! */
-        printf("not enough memory (realloc returned NULL)\n");
-        return 0;
-    }
-
-    (*mem)->data = ptr;
-    memcpy(&((*mem)->data[(*mem)->size]), contents, realsize);
-    (*mem)->size += realsize;
-    (*mem)->data[(*mem)->size] = 0;
-
-    return realsize;
-}
-
-int
-read_url(const char *url, Response *response, struct curl_slist *headers) {
-    response->size = 0;
-    response->data = calloc(1, 1);
-
-    CURL *curl = curl_easy_init();
-    if (curl) {
-        CURLcode res;
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        /* send all data to this function  */
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_easy_write_callback);
-
-        /* we pass our 'chunk' struct to the callback function */
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &response);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1l); // Follow one redirect (fixes some piped instances)
-        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 1);
-        /* some servers do not like requests that are made without a user-agent
-            field, so we provide one */
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0");
-        res = curl_easy_perform(curl);
-        long response_code = 0;
-        if (res == CURLE_OK) {
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-        }
-        curl_easy_cleanup(curl);
-        return (int) response_code;
-    }
-    curl_easy_cleanup(curl);
-    return 0;
-}
 
 //https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
 char *
@@ -69,7 +17,7 @@ urlencode(const char *src) {
     return curl_easy_escape(NULL, src, (int) strlen(src));
 }
 
-ActionType
+enum UriType
 id_from_url(const char *src, char *out) {
     char s;
     if (*src == 'h') { // e.g. https://open.spotify.com/track/4pQRZ0Pt9VPWtqpYsMvomM ...
@@ -77,25 +25,25 @@ id_from_url(const char *src, char *out) {
     } else if (*src == 's') { // e.g. spotify:track:4pQRZ0Pt9VPWtqpYsMvomM
         s = ':';
     } else {
-        return ACTION_NONE;
+        return URI_INVALID;
     }
     char *last = strrchr(src, s);
-    if (!last) return ACTION_NONE;
-    if (strlen(last + 1) < SPOTIFY_ID_LEN) return ACTION_NONE;
+    if (!last) return URI_INVALID;
+    if (strlen(last + 1) < SPOTIFY_ID_LEN) return URI_INVALID;
     for (int i = 0; i < SPOTIFY_ID_LEN; ++i) {
-        if (!isalnum(last[1+i])) return ACTION_NONE;
+        if (!isalnum(last[1+i])) return URI_INVALID;
     }
     memcpy(out, last + 1, SPOTIFY_ID_LEN);
     out[SPOTIFY_ID_LEN] = 0;
     switch (*(last - 1)) {
         case 'k': // tracK
-            return ACTION_TRACK;
+            return URI_TRACK;
         case 'm': // albuM
-            return ACTION_ALBUM;
+            return URI_ALBUM;
         case 't': // playlisT
-            return ACTION_PLAYLIST;
+            return URI_PLAYLIST;
     }
-    return ACTION_NONE;
+    return URI_INVALID;
 }
 
 const char find_str[] = "’";
@@ -118,30 +66,6 @@ sanitize(char **in) {
     }
 }
 
-int
-compare_alphabetical(const void *a, const void *b) {
-    return strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
-}
-
-int
-compare_alphabetical_reverse(const void *a, const void *b) {
-    return -strcmp(((const PlaylistInfo *) a)->name, ((const PlaylistInfo *) b)->name);
-}
-
-int
-compare_last_played(const void *a, const void *b) {
-    return (int) (((const PlaylistInfo *) b)->last_played - ((const PlaylistInfo *) a)->last_played);
-}
-
-int
-compare_last_played_reverse(const void *a, const void *b) {
-    return (int) (((const PlaylistInfo *) a)->last_played - ((const PlaylistInfo *) b)->last_played);
-}
-
-int compare_artist_quantities(const void *a, const void *b) {
-    return (int) (((struct ArtistQuantity *) b)->appearances - ((struct ArtistQuantity *) a)->appearances);
-}
-
 bool str_is_empty(const char *str) {
     size_t len = strlen(str);
     for (int i = 0; i < len; ++i) {
@@ -150,17 +74,20 @@ bool str_is_empty(const char *str) {
     return true;
 }
 
-void
+int
 rek_mkdir(const char *path) {
     char *sep = strrchr(path, '/');
     if (sep != NULL) {
         *sep = 0;
-        rek_mkdir(path);
+        if(rek_mkdir(path)) return 1;
         *sep = '/';
     }
-    if (strlen(path) == 0)return;
-    if (mkdir(path, 0777) && errno != EEXIST)
+    if (strlen(path) == 0)return 0;
+    if (mkdir(path, 0777) && errno != EEXIST){
         printf("[util] Error while trying to create '%s': %s\n", path, strerror(errno));
+        return 1;
+    }
+    return 0;
 }
 
 FILE
@@ -177,7 +104,7 @@ FILE
 
 int
 decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context *ctx, size_t *progress,
-              struct audio_info *info, struct audio_info *previous, audio_info_cb cb) {
+              struct audio_info *info, struct audio_info *previous, audio_info_cb cb, void *userp) {
     switch (ctx->state) {
         case START: {
             ogg_sync_init(&ctx->oy);
@@ -223,13 +150,9 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                 }
 
                 if (ctx->p >= 3) {
-                    info->sample_rate = ctx->vi.rate;
-                    info->bitrate = ctx->vi.bitrate_nominal;
-                    info->channels = ctx->vi.channels;
-                    info->finished_reading = false;
-                    info->total_frames = 0;
+                    audio_info_set(info, ctx->vi.rate, ctx->vi.bitrate_nominal, ctx->vi.channels);
                     if (cb) {
-                        cb(info, previous);
+                        cb(userp, info, previous);
                         ctx->cb_called = true;
                     }
                     if (vorbis_synthesis_init(&ctx->vd, &ctx->vi)) {
@@ -275,7 +198,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                         } else {
                             /* we have a packet.  Decode it */
                             float **pcm;
-                            int samples;
+                            unsigned int samples;
 
                             if (vorbis_synthesis(&ctx->vb, &ctx->op) == 0) /* test for success! */
                                 vorbis_synthesis_blockin(&ctx->vd, &ctx->vb);
@@ -300,7 +223,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
                                 }
 
                                 buf_out->len += samples * ctx->vi.channels;
-                                info->total_frames += samples;
+                                audio_info_add_frames(info, samples);
 
                                 ctx->p += samples * ctx->vi.channels * sizeof(*buf_out->buf);
 
@@ -321,7 +244,7 @@ decode_vorbis(struct evbuffer *in, struct buffer *buf_out, struct decode_context
             return 1 + fails;
             eos:
             ctx->state = EOS;
-            info->finished_reading = true;
+            audio_info_set_finished(info);
             vorbis_block_clear(&ctx->vb);
             vorbis_dsp_clear(&ctx->vd);
             ogg_stream_clear(&ctx->os);

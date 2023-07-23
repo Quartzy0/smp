@@ -1,200 +1,29 @@
-#include <stdio.h>
 #include <pthread.h>
-#include <string.h>
 #include <stdlib.h>
 #include "spotify.h"
-#include "audio.h"
 #include "dbus.h"
-#include "util.h"
-#include <unistd.h>
 #include "config.h"
 #include "cli.h"
+#include "ctrl.h"
 #include <event2/event.h>
+#include <unistd.h>
 
-size_t track_index = -1;
-Track *tracks = NULL;
-size_t track_count = -1;
-size_t track_size = -1;
-Track *next_tracks = NULL;
-size_t next_track_count = 0;
-bool recommendations_loading = false;
-struct connection *currently_streaming;
-
-void
-tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
-    if (userp) free(userp);
-    recommendations_loading = false;
-    printf("[ctrl] Track list loaded\n");
-    cancel_track_transfer(currently_streaming);
-    currently_streaming = play_track(spotify, &tracks[track_index], &spotify->smp_ctx->audio_buf, NULL);
-}
-
-void
-spotify_conn_err(struct connection *conn, void *userp) {
-    if (conn->payload) { // Remove possible left over files
-        if (conn->payload[0] == MUSIC_DATA || conn->payload[0] == MUSIC_INFO) {
-            char *music_info_path, *music_data_path;
-            track_info_filepath_id(&conn->payload[1], &music_info_path);
-            track_filepath_id(&conn->payload[1], &music_data_path);
-            remove(music_info_path);
-            remove(music_data_path);
-        }
-    }
-
-    Action a = {.type = ACTION_POSITION_RELATIVE, .position = 1};
-    write(conn->spotify->smp_ctx->action_fd[1], &a, sizeof(a)); // Try playing next track on failure
-    printf("[ctrl] Error occurred on connection, trying to play next track\n");
-}
-
-void
-handle_action(int fd, short what, void *arg) {
-    struct smp_context *ctx = (struct smp_context *) arg;
-    Action a;
-    read(fd, &a, sizeof(a));
-    switch (a.type) {
-        case ACTION_QUIT: {
-            stop();
-            for (int i = 0; i < ctx->spotify->connections_len; ++i) {
-                struct connection *conn = &ctx->spotify->connections[i];
-                if (conn->bev) bufferevent_free(conn->bev);
-                if (conn->cache_fp) fclose(conn->cache_fp);
-                if (conn->cache_path) remove(conn->cache_path); // Remove unfinished file
-                if (conn->params.path) free(conn->params.path);
-            }
-            event_base_loopbreak(ctx->base);
-            break;
-        }
-        case ACTION_ALBUM: {
-            printf("[ctrl] Starting album with id %s\n", a.id);
-            clear_tracks(tracks, &track_count, &track_size);
-            track_index = 0;
-            add_playlist(ctx->spotify, a.id, &tracks, &track_size, &track_count, true, tracks_loaded_cb);
-            break;
-        }
-        case ACTION_PLAYLIST: {
-            printf("[ctrl] Starting playlist with id %s\n", a.id);
-            clear_tracks(tracks, &track_count, &track_size);
-            track_index = 0;
-            add_playlist(ctx->spotify, a.id, &tracks, &track_size, &track_count, false, tracks_loaded_cb);
-            break;
-        }
-        case ACTION_PAUSE: {
-            if (started) pause();
-            break;
-        }
-        case ACTION_PLAY: {
-            if (started) play();
-            break;
-        }
-        case ACTION_PLAYPAUSE: {
-            if (started) {
-                if (status) pause();
-                else play();
-            }
-            break;
-        }
-        case ACTION_STOP: {
-            pause();
-            stop();
-            clear_tracks(tracks, &track_count, &track_size);
-            free_tracks(next_tracks, next_track_count);
-            next_tracks = NULL;
-            next_track_count = 0;
-            break;
-        }
-        case ACTION_TRACK_OVER:
-        case ACTION_POSITION_RELATIVE: {
-            if (track_index == -1 || track_size == -1 || track_count == -1 || track_count == 0) break;
-            if (a.type == ACTION_TRACK_OVER && loop_mode == LOOP_MODE_TRACK) {
-                //Do nothing
-            } else if (shuffle) {
-                size_t newI;
-                while ((newI = (size_t) ((float) track_count *
-                                         ((float) rand() / (float) RAND_MAX))) == track_index &&
-                       track_count > 1) {}
-                track_index = newI;
-            } else {
-                if (track_index + a.position >= track_count || track_index + a.position < 0) {
-                    if (loop_mode == LOOP_MODE_PLAYLIST) {
-                        track_index = 0;
-                        if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
-                            fprintf(stderr, "[ctrl] Error when trying to play track\n");
-                            Action a1 = {.type = ACTION_POSITION_RELATIVE, .position = 1};
-                            write(ctx->action_fd[1], &a1, sizeof(a1));
-                        }
-                        break;
-                    }
-                    //Continue playing recommendations
-                    if(!recommendations_loading) {
-                        recommendations_loading = true;
-                        add_recommendations_from_tracks(ctx->spotify, &tracks, &track_size, &track_count,
-                                                    tracks_loaded_cb);
-                    }
-                    track_index += a.position;
-                    break;
-                } else {
-                    track_index += a.position;
-                }
-            }
-            if (play_track(ctx->spotify, &tracks[track_index], &ctx->audio_buf, NULL)) {
-                fprintf(stderr, "[ctrl] Error when trying to play track\n");
-                Action a1 = {.type = ACTION_POSITION_RELATIVE, .position = 1};
-                write(ctx->action_fd[1], &a1, sizeof(a1));
-            }
-            break;
-        }
-        case ACTION_POSITION_ABSOLUTE: {
-            if (!started) break;
-            pause();
-            stop();
-            if (a.position >= track_count || a.position < 0) break;
-            track_index = a.position;
-            break;
-        }
-        case ACTION_TRACK: {
-            printf("[ctrl] Starting track with id %s\n", a.id);
-
-            clear_tracks(tracks, &track_count, &track_size);
-            track_index = 0;
-
-            add_track_info(ctx->spotify, a.id, &tracks, &track_size, &track_count, tracks_loaded_cb);
-            break;
-        }
-        case ACTION_SEEK: {
-            if (!started) break;
-            seek = a.position;
-            printf("[ctrl] Seek to: %ld\n", seek);
-            break;
-        }
-        case ACTION_SET_POSITION: {
-            if (!started) break;
-            if (ctx->audio_info.finished_reading &&
-                (a.position > (int64_t) (ctx->audio_info.total_frames / ctx->audio_info.sample_rate) * 1000000 ||
-                 a.position < 0))
-                break;
-            seek = -((int64_t) (((double) ctx->audio_buf.offset / (double) ctx->audio_info.sample_rate) *
-                                1000000.0) -
-                     a.position);
-            printf("[ctrl] Set position to: %ld (seek: %ld)\n", a.position, seek);
-            break;
-        }
-        case ACTION_SEARCH: {
-            struct search_params *params = malloc(sizeof(*params));
-            memcpy(params, &a.search_params, sizeof(*params));
-            search(ctx->spotify, params->query, handle_search_response, params->tracks, params->artists, params->albums,
-                   params->playlists, params);
-            break;
-        }
-        case ACTION_NONE: {
-            break;
-        }
-    }
-}
 
 void
 dbus_poll(int fd, short what, void *arg){
     struct dbus_state *dbus_state = (struct dbus_state*) arg;
     handle_message(dbus_state->bus);
+}
+
+static int check_for_folder(const char *path){
+    if (access(track_info_path, F_OK)){
+        printf("'%s' doesn't exist, creating\n", path);
+        return rek_mkdir(path);
+    } else if (access(track_info_path, R_OK | W_OK)){
+        fprintf(stderr, "'%s' exists but can't be written/read to\n", path);
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -206,62 +35,34 @@ int main(int argc, char **argv) {
     if (load_config()) {
         return EXIT_FAILURE;
     }
+    if (check_for_folder(track_save_path)) return 1;
+    if (check_for_folder(track_info_path)) return 1;
+    if (check_for_folder(album_info_path)) return 1;
+    if (check_for_folder(playlist_info_path)) return 1;
 
-    struct spotify_state state;
-    memset(&state, 0, sizeof(state));
-    state.connections_len = 0;
-    state.err_cb = spotify_conn_err;
-    struct smp_context ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.base = event_base_new();
-    ctx.spotify = &state;
-    state.base = ctx.base;
-    state.smp_ctx = &ctx;
+    struct event_base *base = event_base_new();
+    struct smp_context *ctx = ctrl_create_context(base);
 
-    volume = initial_volume;
-    memset(&ctx.audio_buf, 0, sizeof(ctx.audio_buf));
-    ctx.audio_buf.buf = calloc(12000000, sizeof(*ctx.audio_buf.buf));
-    ctx.audio_buf.size = 12000000;
-
-    pipe(ctx.action_fd);
-
-    ctx.action_event = event_new(ctx.base, ctx.action_fd[0], EV_READ | EV_PERSIST, handle_action, &ctx);
-    if (!ctx.action_event) {
-        fprintf(stderr, "[ctrl] Error when creating action event\n");
-        close(ctx.action_fd[0]);
-        close(ctx.action_fd[1]);
-        return 1;
-    }
-    event_add(ctx.action_event, NULL);
-
-    struct dbus_state *dbus_state = init_dbus(&ctx);
-    struct event *dbus_polling = event_new(ctx.base, -1, EV_PERSIST, dbus_poll, dbus_state);
+    struct dbus_state *dbus_state = init_dbus(ctx);
+    struct event *dbus_polling = event_new(base, -1, EV_PERSIST, dbus_poll, dbus_state);
     struct timeval tv = {
             .tv_sec = 0,
             .tv_usec = 50000,
     };
     event_add(dbus_polling, &tv);
 
-    init(&ctx, &ctx.audio_buf, dbus_state);
+    ctrl_init_audio(ctx, dbus_state->mplayer_iface, initial_volume);
 
-    refresh_available_regions(&state);
+    refresh_available_regions(ctrl_get_spotify_state(ctx));
 
-    event_base_dispatch(ctx.base);
+    event_base_dispatch(base);
 
-    clean_audio();
-    cleanup();
-    clean_config();
-    if (ctx.action_event) event_free(ctx.action_event);
-    event_base_free(ctx.base);
-    clean_vorbis_decode(&ctx.spotify->decode_ctx);
-    for (int i = 0; i < sizeof(ctx.spotify->connections) / sizeof(*ctx.spotify->connections); ++i) {
-        free(ctx.spotify->connections[i].cache_path);
-    }
-    clear_tracks(tracks, &track_count, &track_size);
-    close(ctx.action_fd[0]);
-    close(ctx.action_fd[1]);
+    event_free(dbus_polling);
+    ctrl_free(ctx);
     dbus_util_free_bus(dbus_state->bus);
     free(dbus_state);
+    clean_config();
+    event_base_free(base);
 
     return EXIT_SUCCESS;
 }
