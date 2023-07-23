@@ -40,19 +40,17 @@ mkdir build && cd build
 ```
 In this directory execute the following commands to build the project:
 ```shell
-cmake -DCMAKE_BUILD_TYPE=Release ..
-```
-Building smp using this command will cause it to automatically check if PipeWire is installed
-and use it as opposed to the default PortAudio backend. If you want to you the PortAudio backend regardless,
-you can use the following command:
-```shell
-cmake -DCMAKE_BUILD_TYPE=Release -DNO_PIPEWIRE=ON ..
-```
-Lastly, compile the program:
-```shell
-make
+cmake -DCMAKE_BUILD_TYPE=Release .. && make
 ```
 Once the compilation is finished, the executable, named `smp` will be in the build directory.
+
+When compiling smp will automatically check if PipeWire is installed and use it
+as opposed to the default PortAudio backend. If you want to you the PortAudio backend regardless,
+you can use the following command:
+```shell
+cmake -DCMAKE_BUILD_TYPE=Release -DNO_PIPEWIRE=ON .. && make
+```
+
 
 ### Using the CLI
 #### Starting the daemon
@@ -169,8 +167,6 @@ file at `$HOME/.config/smp/smp.json`
 ```json5
 {
     //Number of tracks to download ahead of the current track
-    //This option is useful since each track has to be downloaded,
-    //which would result in long wait times between tracks
     "preload_amount": 3,
     
     //The volume the player should start with. Even if this option
@@ -181,17 +177,20 @@ file at `$HOME/.config/smp/smp.json`
     //Defaults to $XDG_CACHE_HOME/smp/tracks or $HOME/.cache/smp/tracks
     "track_save_path": "/home/user/.cache/smp/tracks",
     
-    //The location where the saved playlists should be stored.
-    //Defaults to $XDG_DATA_HOME/smp/playlists or $HOME/.local/share/smp/playlists
-    "playlist_save_path": "/home/user/.local/share/smp/playlists",
+    //The location where the saved playlist data should be stored.
+    //Defaults to $XDG_CACHE_HOME/smp/playlist_info or $HOME/.cache/smp/playlist_info
+    "playlist_info_path": "/home/user/.cache/smp/playlist_info",
+
+    //The location where the saved album data should be stored.
+    //Defaults to $XDG_CACHE_HOME/smp/album_info or $HOME/.cache/smp/album_info
+    "album_info_path": "/home/user/.cache/smp/album_info",
+
+    //The location where the saved track data should be stored.
+    //Defaults to $XDG_CACHE_HOME/smp/track_info or $HOME/.cache/smp/track_info
+    "track_info_path": "/home/user/.cache/smp/track_info",
     
-    //A string array of piped instances to use. These are used to search
-    //for tracks on YouTube and YouTube Music but not to download the tracks.
-    //By default, it is populated by piped instances from https://piped-instances.kavin.rocks/
-    "piped_api_instances": [],
-    
-    //A string array of invidious/piped instances to use for downloading tracks.
-    //By default, it is populated by invidious instances from https://api.invidious.io/instances.json
-    "download_instances": []
+    //A string array of backend instances to use. These are what
+    //is actually used for all communication with spotify.
+    "backend_instances": ["nodes.quartzy.me"],
 }
 ```

@@ -1,6 +1,5 @@
 #include "spotify.h"
 #include <unistd.h>
-#include <curl/curl.h>
 #include "util.h"
 #include <stddef.h>
 #include <stdio.h>
@@ -70,11 +69,11 @@ free_tracks(Track *track, size_t count) {
         track[i].spotify_name = NULL;
         free(track[i].spotify_album_art);
         track[i].spotify_album_art = NULL;
-        curl_free(track[i].spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
+        free(track[i].spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
         track[i].spotify_name_escaped = NULL;
         free(track[i].artist);
         track[i].artist = NULL;
-        curl_free(track[i].artist_escaped);
+        free(track[i].artist_escaped);
         track[i].artist_escaped = NULL;
     }
 }
@@ -83,9 +82,9 @@ void
 free_track(Track *track) {
     free(track->spotify_name);
     free(track->spotify_album_art);
-    curl_free(track->spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
+    free(track->spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
     free(track->artist);
-    curl_free(track->artist_escaped);
+    free(track->artist_escaped);
     if (track->playlist) {
         if (--track->playlist->reference_count == 0) {
             free(track->playlist->name);
