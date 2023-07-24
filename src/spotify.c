@@ -69,12 +69,8 @@ free_tracks(Track *track, size_t count) {
         track[i].spotify_name = NULL;
         free(track[i].spotify_album_art);
         track[i].spotify_album_art = NULL;
-        free(track[i].spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
-        track[i].spotify_name_escaped = NULL;
         free(track[i].artist);
         track[i].artist = NULL;
-        free(track[i].artist_escaped);
-        track[i].artist_escaped = NULL;
     }
 }
 
@@ -82,9 +78,7 @@ void
 free_track(Track *track) {
     free(track->spotify_name);
     free(track->spotify_album_art);
-    free(track->spotify_name_escaped); //Escaped names were generated using curl and must be freed using curl
     free(track->artist);
-    free(track->artist_escaped);
     if (track->playlist) {
         if (--track->playlist->reference_count == 0) {
             free(track->playlist->name);
@@ -104,6 +98,12 @@ clear_tracks(Track *tracks, size_t *track_len, size_t *track_size) {
     }
     *track_len = 0;
     for (size_t i = 0; i < *track_len; ++i) free_track(&tracks[i]);
+}
+
+void
+deref_playlist(PlaylistInfo *playlist){
+    if (!playlist || !playlist->not_empty || --playlist->reference_count != 0)return;
+    free_playlist(playlist);
 }
 
 void
@@ -139,28 +139,28 @@ free_connection(struct connection *conn) {
 void
 track_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((track_save_path_len + SPOTIFY_ID_LEN + 4 + 1) * sizeof(char));
-    snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%s.ogg", track_save_path,
+    snprintf((*out), track_save_path_len + SPOTIFY_ID_LEN + 4 + 1, "%s%.22s.ogg", track_save_path,
              id);
 }
 
 void
 track_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((track_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
-    snprintf((*out), track_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", track_info_path,
+    snprintf((*out), track_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%.22s.json", track_info_path,
              id);
 }
 
 void
 album_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((album_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
-    snprintf((*out), album_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", album_info_path,
+    snprintf((*out), album_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%.22s.json", album_info_path,
              id);
 }
 
 void
 playlist_info_filepath_id(const char id[SPOTIFY_ID_LEN], char **out) {
     (*out) = malloc((playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1) * sizeof(char));
-    snprintf((*out), playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%s.json", playlist_info_path,
+    snprintf((*out), playlist_info_path_len + SPOTIFY_ID_LEN + 5 + 1, "%s%.22s.json", playlist_info_path,
              id);
 }
 
@@ -513,7 +513,8 @@ make_and_parse_generic_request_with_conn(struct connection *conn, char *payload,
 
 int
 make_and_parse_generic_request(struct spotify_state *spotify, char *payload, size_t payload_len, char *cache_path,
-                               json_parse_func func, void *userp, info_received_cb func1, void *userp1) {
+                               json_parse_func func, void *userp, info_received_cb func1, void *userp1,
+                               info_received_cb read_local_cb) {
     //Try to read from file
     if (cache_path) {
         FILE *fp = fopen(cache_path, "r");
@@ -528,7 +529,8 @@ make_and_parse_generic_request(struct spotify_state *spotify, char *payload, siz
         file_buf[file_len] = 0;
         int ret;
         if ((ret = func(file_buf, file_len + 1, userp)) != 0) return ret;
-        if (func1) func1(spotify, userp1);
+        if (read_local_cb) read_local_cb(spotify, userp1);
+        else if (func1) func1(spotify, userp1);
         return ret;
     }
     //Make request and download data otherwise
@@ -750,7 +752,6 @@ parse_track_cjson(cJSON *track_json, Track *track) {
     memcpy(track->spotify_id, id, SPOTIFY_ID_LEN_NULL);
     track->spotify_name = strdup(cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "name")));
     sanitize(&track->spotify_name);
-    track->spotify_name_escaped = urlencode(track->spotify_name);
     memcpy(track->spotify_uri, cJSON_GetStringValue(cJSON_GetObjectItem(track_json, "uri")), SPOTIFY_URI_LEN_NULL);
 
     char *album_cover = cJSON_GetStringValue(
@@ -766,7 +767,6 @@ parse_track_cjson(cJSON *track_json, Track *track) {
 
     memcpy(track->spotify_artist_id, cJSON_GetStringValue(cJSON_GetObjectItem(artist, "id")), SPOTIFY_ID_LEN_NULL);
     sanitize(&track->artist);
-    track->artist_escaped = urlencode(track->artist);
 
     cJSON *markets = cJSON_GetObjectItem(track_json, "available_markets");
     track->region_count = cJSON_GetArraySize(markets);
@@ -1139,14 +1139,14 @@ add_track_info(struct spotify_state *spotify, const char id[22], Track **tracks,
     userp1->track_len = track_len;
 
     int ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_track_json, userp1, func,
-                                             userp);
+                                             userp, NULL);
     free(path);
     return ret;
 }
 
 int
 add_playlist(struct spotify_state *spotify, const char id[22], Track **tracks, size_t *track_size, size_t *track_len,
-             bool album, info_received_cb func, void *userp) {
+             bool album, info_received_cb func, void *userp, info_received_cb read_local_cb) {
     char payload[SPOTIFY_ID_LEN + 1];
     memcpy(&payload[1], id, SPOTIFY_ID_LEN);
 
@@ -1161,12 +1161,12 @@ add_playlist(struct spotify_state *spotify, const char id[22], Track **tracks, s
         payload[0] = ALBUM_INFO;
         album_info_filepath_id(id, &path);
         ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_album_json, userp_func,
-                                             func, userp);
+                                             func, userp, read_local_cb);
     } else {
         payload[0] = PLAYLIST_INFO;
         playlist_info_filepath_id(id, &path);
         ret = make_and_parse_generic_request(spotify, payload, sizeof(payload), path, parse_playlist_json, userp_func,
-                                             func, userp);
+                                             func, userp, read_local_cb);
     }
     free(path);
     return ret;
@@ -1189,7 +1189,7 @@ add_recommendations(struct spotify_state *spotify, const char *track_ids, const 
     userp1->track_len = track_len;
 
     return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_recommendations_json,
-                                          userp1, func, userp);
+                                          userp1, func, userp, NULL);
 }
 
 int
@@ -1250,7 +1250,8 @@ search(struct spotify_state *spotify, const char *query, info_received_cb cb, bo
     userp->qtracks = tracks;
     userp->userp = userp_in;
 
-    return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_search_json, userp, cb, userp);
+    return make_and_parse_generic_request(spotify, payload, sizeof(payload), NULL, parse_search_json, userp, cb, userp,
+                                          NULL);
 }
 
 void

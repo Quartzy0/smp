@@ -42,10 +42,8 @@ typedef struct Track {
     char spotify_id[SPOTIFY_ID_LEN_NULL];
     char spotify_uri[SPOTIFY_URI_LEN_NULL];
     char *spotify_name;
-    char *spotify_name_escaped;
     char *spotify_album_art;
     char *artist;
-    char *artist_escaped;
     char spotify_artist_id[SPOTIFY_ID_LEN_NULL];
     char *regions;
     size_t region_count;
@@ -158,7 +156,7 @@ add_track_info(struct spotify_state *spotify, const char id[22], Track **tracks,
 
 int
 add_playlist(struct spotify_state *spotify, const char id[22], Track **tracks, size_t *track_size, size_t *track_len,
-             bool album, info_received_cb func, void *userp);
+             bool album, info_received_cb func, void *userp, info_received_cb read_local_cb);
 
 int
 add_recommendations(struct spotify_state *spotify, const char *track_ids, const char *artist_ids, size_t track_count,
@@ -176,6 +174,8 @@ search(struct spotify_state *spotify, const char *query, info_received_cb cb, bo
 void free_track(Track *track);
 
 void free_tracks(Track *track, size_t count);
+
+void deref_playlist(PlaylistInfo *playlist);
 
 void free_playlist(PlaylistInfo *playlist);
 

@@ -141,10 +141,14 @@ static void Volume_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
 static void Volume_set_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
     struct audio_context *audio_ctx = ctrl_get_audio_context(param);
     double volume;
-    dbus_util_message_context_enter_variant(&ctx, "a{sv}");
+    dbus_util_message_context_enter_variant(&ctx, "d");
     dbus_util_message_context_get_double(ctx, &volume);
     dbus_util_message_context_exit_variant(&ctx);
     audio_set_volume(audio_ctx, volume);
+}
+
+static void PlaylistCount_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
+    dbus_util_message_context_add_uint32_variant(ctx, get_saved_playlist_count());
 }
 
 static void Orderings_cb(dbus_bus *bus, dbus_message_context *ctx, void *param) {
@@ -518,7 +522,7 @@ init_dbus(struct smp_context *ctx) {
     dbus_util_set_method_cb(dbus_state->mplayer_iface, "OpenUri", OpenUri_cb, ctx);
 
     dbus_state->mplaylist_iface = dbus_util_find_interface(dbus_state->mpris_obj, "org.mpris.MediaPlayer2.Playlists");
-    dbus_util_set_property_uint32(dbus_state->mplaylist_iface, "PlaylistCount", 0);
+    dbus_util_set_property_cb(dbus_state->mplaylist_iface, "PlaylistCount", PlaylistCount_cb, NULL, ctx);
     dbus_util_set_property_cb(dbus_state->mplaylist_iface, "Orderings", Orderings_cb, NULL, ctx);
     dbus_util_set_property_cb(dbus_state->mplaylist_iface, "ActivePlaylist", ActivePlaylist_cb, NULL, ctx);
     dbus_util_set_method_cb(dbus_state->mplaylist_iface, "GetPlaylists", GetPlaylists_cb, ctx);
@@ -546,10 +550,8 @@ dbus_add_track(Track *track, dbus_message_context *ctx) {
     memcpy(uri_alloced, track->spotify_uri, sizeof(track->spotify_uri));
     dbus_util_message_context_add_string(ctx, uri_alloced);
     dbus_util_message_context_add_string(ctx, track->spotify_name);
-    dbus_util_message_context_add_string(ctx, track->spotify_name_escaped);
     dbus_util_message_context_add_string(ctx, track->spotify_album_art);
     dbus_util_message_context_add_string(ctx, track->artist);
-    dbus_util_message_context_add_string(ctx, track->artist_escaped);
     memcpy(id_alloced, track->spotify_artist_id, sizeof(track->spotify_artist_id));
     dbus_util_message_context_add_string(ctx, id_alloced);
     dbus_util_message_context_add_uint32(ctx, track->duration_ms);
@@ -600,7 +602,7 @@ dbus_add_artist(Artist *artist, dbus_message_context *ctx) {
 }
 
 void
-handle_search_response(struct spotify_search_results *results) { // Return signature: (ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))
+handle_search_response(struct spotify_search_results *results) { // Return signature: (ba(ssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))
     struct search_params *params = (struct search_params *) results->userp;
 
     dbus_message_context *ctx = dbus_util_make_write_context(params->call);

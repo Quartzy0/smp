@@ -68,9 +68,6 @@ extern bool shuffle;
 #define VEC_STEP 10
 #endif
 
-// https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
-char *urlencode(const char *src);
-
 enum UriType id_from_url(const char *src, char *out);
 
 void sanitize(char **in);

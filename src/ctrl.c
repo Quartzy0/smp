@@ -19,16 +19,28 @@ struct smp_context {
     struct spotify_state *spotify;
     struct audio_context *audio_ctx;
 
+    dbus_interface *player_iface;
+    dbus_interface *playlist_iface;
+    dbus_interface *tracks_iface;
+
     size_t track_index;
 };
 
 bool recommendations_loading = false;
 struct connection *currently_streaming;
+PlaylistInfo *previous_playlist = NULL;
 
 static void
-wrapped_play_track(struct spotify_state *spotify, Track* track, struct buffer *buf){
+wrapped_play_track(struct smp_context *ctx, Track* track, struct buffer *buf){
     cancel_track_transfer(currently_streaming);
-    currently_streaming = play_track(spotify, track, buf);
+    currently_streaming = play_track(ctx->spotify, track, buf);
+    if (track->playlist != previous_playlist){
+        deref_playlist(previous_playlist);
+        previous_playlist = track->playlist;
+        previous_playlist->reference_count++;
+        dbus_util_invalidate_property(ctx->playlist_iface, "ActivePlaylist");
+    }
+    dbus_util_invalidate_property(ctx->player_iface, "Metadata");
 }
 
 static void
@@ -36,7 +48,15 @@ tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
     struct smp_context *ctx = (struct smp_context*) userp;
     recommendations_loading = false;
     printf("[ctrl] Track list loaded\n");
-    wrapped_play_track(spotify, &spotify->tracks[ctx->track_index], &spotify->smp_ctx->audio_buf);
+    wrapped_play_track(ctx, &spotify->tracks[ctx->track_index], &spotify->smp_ctx->audio_buf);
+    dbus_util_invalidate_property(ctx->tracks_iface, "Tracks");
+}
+
+static void
+playlist_loaded_cb(struct spotify_state *spotify, void *userp){
+    struct smp_context *ctx = (struct smp_context*) userp;
+    dbus_util_invalidate_property(ctx->tracks_iface, "PlaylistCount");
+    tracks_loaded_cb(spotify, userp);
 }
 
 static void
@@ -82,10 +102,16 @@ struct smp_context *ctrl_create_context(struct event_base *base) {
     return ctx;
 }
 
-void ctrl_init_audio(struct smp_context *ctx, dbus_interface *player_iface, double initial_volume) {
+void ctrl_set_dbus_ifaces(struct smp_context *ctx, dbus_interface *player, dbus_interface *playlists, dbus_interface *tracks){
+    ctx->player_iface = player;
+    ctx->playlist_iface = playlists;
+    ctx->tracks_iface = tracks;
+}
+
+void ctrl_init_audio(struct smp_context *ctx, double initial_volume) {
     ctx->audio_buf.buf = calloc(12000000, sizeof(*ctx->audio_buf.buf));
     ctx->audio_buf.size = 12000000;
-    ctx->audio_ctx = audio_init(&ctx->audio_buf, player_iface, ctx->audio_next_fd[1]);
+    ctx->audio_ctx = audio_init(&ctx->audio_buf, ctx->audio_next_fd[1]);
     audio_set_volume(ctx->audio_ctx, initial_volume);
 }
 
@@ -124,7 +150,8 @@ ctrl_play_album(struct smp_context *ctx, const char *id) {
     printf("[ctrl] Starting album with id %s\n", id);
     clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
     ctx->track_index = 0;
-    add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, true, tracks_loaded_cb, ctx);
+    add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, true,
+                 playlist_loaded_cb, ctx, tracks_loaded_cb);
 }
 
 void
@@ -132,7 +159,8 @@ ctrl_play_playlist(struct smp_context *ctx, const char *id){
     printf("[ctrl] Starting playlist with id %s\n", id);
     clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
     ctx->track_index = 0;
-    add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, false, tracks_loaded_cb, ctx);
+    add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, false,
+                 playlist_loaded_cb, ctx, tracks_loaded_cb);
 }
 
 void
@@ -165,23 +193,27 @@ void ctrl_play_uri(struct smp_context *ctx, const char *id){
 void
 ctrl_pause(struct smp_context *ctx){
     audio_pause(ctx->audio_ctx);
+    dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
 }
 
 void
 ctrl_play(struct smp_context *ctx){
     audio_play(ctx->audio_ctx);
+    dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
 }
 
 void
 ctrl_playpause(struct smp_context *ctx){
     if (audio_playing(ctx->audio_ctx)) audio_pause(ctx->audio_ctx);
     else audio_play(ctx->audio_ctx);
+    dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
 }
 
 void
 ctrl_stop(struct smp_context *ctx){
     audio_stop(ctx->audio_ctx);
     clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
+    dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
 }
 
 void
@@ -200,7 +232,7 @@ ctrl_change_track_index(struct smp_context *ctx, int32_t i){
         if (ctx->track_index >= ctx->spotify->track_count || ctx->track_index < 0) {
             if (loop_mode == LOOP_MODE_PLAYLIST) {
                 ctx->track_index = 0;
-                wrapped_play_track(ctx->spotify, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
+                wrapped_play_track(ctx, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
                 return;
             }
             //Continue playing recommendations
@@ -212,7 +244,7 @@ ctrl_change_track_index(struct smp_context *ctx, int32_t i){
             return;
         }
     }
-    wrapped_play_track(ctx->spotify, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
+    wrapped_play_track(ctx, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
 }
 
 void ctrl_set_track_index(struct smp_context *ctx, int32_t i){

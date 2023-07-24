@@ -1,5 +1,4 @@
 #include "util.h"
-#include <curl/curl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -10,12 +9,6 @@
 
 LoopMode loop_mode = LOOP_MODE_NONE;
 bool shuffle = false;
-
-//https://gist.github.com/jesobreira/4ba48d1699b7527a4a514bfa1d70f61a
-char *
-urlencode(const char *src) {
-    return curl_easy_escape(NULL, src, (int) strlen(src));
-}
 
 enum UriType
 id_from_url(const char *src, char *out) {

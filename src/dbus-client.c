@@ -612,16 +612,10 @@ dbus_parse_track(Track *track, DBusMessageIter *iter) {
     track->spotify_name = strdup(val);
     dbus_message_iter_next(&sub);
     dbus_message_iter_get_basic(&sub, &val);
-    track->spotify_name_escaped = strdup(val);
-    dbus_message_iter_next(&sub);
-    dbus_message_iter_get_basic(&sub, &val);
     track->spotify_album_art = strdup(val);
     dbus_message_iter_next(&sub);
     dbus_message_iter_get_basic(&sub, &val);
     track->artist = strdup(val);
-    dbus_message_iter_next(&sub);
-    dbus_message_iter_get_basic(&sub, &val);
-    track->artist_escaped = strdup(val);
     dbus_message_iter_next(&sub);
     dbus_message_iter_get_basic(&sub, &val);
     memcpy(track->spotify_artist_id, val, sizeof(track->spotify_artist_id));

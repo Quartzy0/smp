@@ -25,7 +25,6 @@ struct audio_context {
     struct pw_thread_loop *loop;
     struct pw_stream *stream;
     struct buffer *audio_buf;
-    dbus_interface *player_iface;
 
     int track_over_fd;
 
@@ -120,11 +119,10 @@ static const struct pw_stream_events stream_events = {
 };
 
 struct audio_context *
-audio_init(struct buffer *audio_buf, dbus_interface *player_iface, int track_over_fd) {
+audio_init(struct buffer *audio_buf, int track_over_fd) {
     pw_init(NULL, NULL);
     struct audio_context *data = calloc(1, sizeof(*data));
     data->audio_buf = audio_buf;
-    data->player_iface = player_iface;
     data->track_over_fd = track_over_fd;
     return data;
 }
@@ -151,11 +149,9 @@ int audio_play(struct audio_context *ctx) {
 int audio_stop(struct audio_context *ctx) {
     if (!ctx->started) return 0;
     ctx->status = false;
-    pw_thread_loop_lock(ctx->loop);
-    pw_stream_set_active(ctx->stream, false);
 
+    pw_thread_loop_stop(ctx->loop);
     pw_stream_destroy(ctx->stream);
-    pw_thread_loop_unlock(ctx->loop);
     pw_thread_loop_destroy(ctx->loop);
 
     ctx->audio_buf->offset = 0;
@@ -260,7 +256,6 @@ double audio_get_volume(struct audio_context *ctx) {
 
 void audio_set_volume(struct audio_context *ctx, double volume) {
     ctx->volume = volume;
-    dbus_util_invalidate_property(ctx->player_iface, "Volume");
 }
 
 void audio_info_set(struct audio_info *info, size_t sample_rate, size_t bitrate, int channels) {

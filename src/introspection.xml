@@ -84,7 +84,7 @@
             <arg name="Playlists" type="b"/>
             <arg name="Query" type="s"/>
 
-            <arg name="Output" type="(ba(ssssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))"/>
+            <arg name="Output" type="(ba(ssssssu))(ba(bsssu))(ba(bsssu))(ba(ssu))"/>
         </method>
     </interface>
 </node>
