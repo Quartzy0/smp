@@ -33,9 +33,9 @@ else()
     target_link_libraries(smp portaudio)
 endif ()
 
-set(CJSON_OVERRIDE_BUILD_SHARED_LIBS false)
-set(CJSON_BUILD_SHARED_LIBS false)
-set(BUILD_SHARED_LIBS false)
+set(CJSON_OVERRIDE_BUILD_SHARED_LIBS OFF)
+set(CJSON_BUILD_SHARED_LIBS OFF)
+set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(lib/cjson EXCLUDE_FROM_ALL)
 
 add_subdirectory(lib/dbus-util)

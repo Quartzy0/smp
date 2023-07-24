@@ -607,7 +607,7 @@ handle_search_response(struct spotify_search_results *results) { // Return signa
 
     dbus_message_context *ctx = dbus_util_make_write_context(params->call);
 
-    ADD_DBUS_ARRAY(dbus_add_track, "ssssssssu", results->track_len, results->tracks, params->tracks, ctx);
+    ADD_DBUS_ARRAY(dbus_add_track, "ssssssu", results->track_len, results->tracks, params->tracks, ctx);
     ADD_DBUS_ARRAY(dbus_add_playlist, "bsssu", results->album_len, results->albums, params->albums, ctx);
     ADD_DBUS_ARRAY(dbus_add_playlist, "bsssu", results->playlist_len, results->playlists, params->playlists, ctx);
     ADD_DBUS_ARRAY(dbus_add_artist, "ssu", results->artist_len, results->artists, params->artists, ctx);
