@@ -565,8 +565,9 @@ track_data_read_cb(struct bufferevent *bev, struct connection *conn, void *arg) 
     }
 }
 
-struct connection *
-read_remote_track(struct spotify_state *spotify, const Track *track, struct buffer *buf) {
+int
+read_remote_track(struct spotify_state *spotify, const Track *track, struct buffer *buf,
+                  struct connection **conn_out) {
     struct connection *conn;
 
     if (track->region_count > 0){
@@ -601,11 +602,12 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
                 else
                     fprintf(stderr, "%.2s,", &track->regions[i * 2]);
             }
-            return NULL;
+            return 1;
         }
         struct backend_sort *inst = &scores[((uint32_t) (((float) rand() / (float) RAND_MAX) * (float) (fzero / 2 + 1)))];
         conn = spotify_connect_with_backend(inst->inst, spotify);
-        if (!conn) return NULL;
+        if (!conn) return 1;
+        *conn_out = conn;
 
         conn->payload = malloc(25);
         conn->payload_len = 25;
@@ -617,7 +619,8 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
         }
     }else{
         conn = spotify_connect(spotify);
-        if (!conn) return NULL;
+        if (!conn) return 1;
+        *conn_out = conn;
 
         conn->payload = malloc(25);
         conn->payload_len = 25;
@@ -646,9 +649,9 @@ read_remote_track(struct spotify_state *spotify, const Track *track, struct buff
     }
     track_filepath_id(track->spotify_id, &conn->cache_path);
 
-    if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return NULL;
+    if (bufferevent_write(conn->bev, conn->payload, conn->payload_len) != 0) return 1;
     bufferevent_setcb(conn->bev, generic_read_cb, NULL, spotify_bufferevent_cb, conn);
-    return conn;
+    return 0;
 }
 
 int
@@ -695,26 +698,26 @@ read_local_track(struct spotify_state *spotify, const char id[SPOTIFY_ID_LEN], s
     return 1;
 }
 
-struct connection *
-play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf) {
-    if (!spotify || !track || !buf) return NULL;
+int
+play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, struct connection **conn_out) {
+    if (!spotify || !track || !buf) return 0;
     clean_vorbis_decode(&spotify->decode_ctx);
     if (read_local_track(spotify, track->spotify_id, buf))
-        return read_remote_track(spotify, track, buf); // TODO: Handle audio corruption on remote track
-    return NULL;
+        return read_remote_track(spotify, track, buf, conn_out); // TODO: Handle audio corruption on remote track
+    return 0;
 }
 
-struct connection *
-ensure_track(struct spotify_state *spotify, const Track *track, char *region) {
-    if (!spotify || !track) return NULL;
+int
+ensure_track(struct spotify_state *spotify, const Track *track, char *region, struct connection **conn_out) {
+    if (!spotify || !track) return 0;
     char *path = NULL;
     track_filepath_id(track->spotify_id, &path);
     if (!access(path, R_OK)) {
         free(path);
-        return NULL;
+        return 0;
     }
     free(path);
-    return read_remote_track(spotify, track, NULL);
+    return read_remote_track(spotify, track, NULL, conn_out);
 }
 
 int

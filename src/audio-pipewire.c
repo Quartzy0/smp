@@ -44,9 +44,10 @@ static void on_process(void *userdata) {
     struct spa_buffer *buf;
     float *dst;
 
-    if (!data->audio_buf->len || !data->audio_info.channels || (data->audio_info.finished_reading &&
-                                                                data->audio_info.total_frames <=
-                                                                data->audio_buf->offset))
+    if (!data->started || !data->status || !data->audio_buf->len || !data->audio_info.channels ||
+        (data->audio_info.finished_reading &&
+         data->audio_info.total_frames <=
+         data->audio_buf->offset))
         return;
 
     if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL) {
@@ -129,21 +130,13 @@ audio_init(struct buffer *audio_buf, int track_over_fd) {
 
 int
 audio_pause(struct audio_context *ctx) {
-    if (!ctx->status || !ctx->started) return 0;
     ctx->status = false;
-    pw_thread_loop_lock(ctx->loop);
-    int ret = pw_stream_set_active(ctx->stream, false);
-    pw_thread_loop_unlock(ctx->loop);
-    return ret;
+    return 0;
 }
 
 int audio_play(struct audio_context *ctx) {
-    if (ctx->status || !ctx->started) return 0;
-    ctx->status = true;
-    pw_thread_loop_lock(ctx->loop);
-    int ret = pw_stream_set_active(ctx->stream, true);
-    pw_thread_loop_unlock(ctx->loop);
-    return ret;
+    ctx->status = true && ctx->started;
+    return 0;
 }
 
 int audio_stop(struct audio_context *ctx) {
@@ -273,11 +266,11 @@ void audio_info_add_frames(struct audio_info *info, size_t frames) {
     info->total_frames += frames;
 }
 
-struct audio_info *audio_get_info(struct audio_context *ctx){
+struct audio_info *audio_get_info(struct audio_context *ctx) {
     return &ctx->audio_info;
 }
 
-struct audio_info *audio_get_info_prev(struct audio_context *ctx){
+struct audio_info *audio_get_info_prev(struct audio_context *ctx) {
     return &ctx->previous;
 }
 

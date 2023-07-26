@@ -144,9 +144,9 @@ struct spotify_state {
 
 void clear_tracks(Track *tracks, size_t *track_len, size_t *track_size);
 
-struct connection *play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf);
+int play_track(struct spotify_state *spotify, const Track *track, struct buffer *buf, struct connection **conn_out);
 
-struct connection * ensure_track(struct spotify_state *spotify, const Track *track, char *region);
+int ensure_track(struct spotify_state *spotify, const Track *track, char *region, struct connection **conn_out);
 
 int refresh_available_regions(struct spotify_state *spotify);
 

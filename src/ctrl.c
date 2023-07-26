@@ -33,11 +33,15 @@ PlaylistInfo *previous_playlist = NULL;
 static void
 wrapped_play_track(struct smp_context *ctx, Track* track, struct buffer *buf){
     cancel_track_transfer(currently_streaming);
-    currently_streaming = play_track(ctx->spotify, track, buf);
+    if(play_track(ctx->spotify, track, buf, &currently_streaming)){
+        fprintf(stderr, "[ctrl] Error occurred while trying to play track, playing next one.\n");
+        ctrl_change_track_index(ctx, 1);
+        return;
+    }
     if (track->playlist != previous_playlist){
         deref_playlist(previous_playlist);
         previous_playlist = track->playlist;
-        previous_playlist->reference_count++;
+        if (previous_playlist) previous_playlist->reference_count++;
         dbus_util_invalidate_property(ctx->playlist_iface, "ActivePlaylist");
     }
     dbus_util_invalidate_property(ctx->player_iface, "Metadata");
@@ -204,9 +208,8 @@ ctrl_play(struct smp_context *ctx){
 
 void
 ctrl_playpause(struct smp_context *ctx){
-    if (audio_playing(ctx->audio_ctx)) audio_pause(ctx->audio_ctx);
-    else audio_play(ctx->audio_ctx);
-    dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
+    if (audio_playing(ctx->audio_ctx)) ctrl_pause(ctx);
+    else ctrl_play(ctx);
 }
 
 void
