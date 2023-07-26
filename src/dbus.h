@@ -16,6 +16,7 @@ struct dbus_state{
     dbus_interface *mplayer_iface;
     dbus_interface *mplaylist_iface;
     dbus_interface *mtracks_iface;
+    dbus_interface *smp_iface;
 };
 
 struct smp_context;

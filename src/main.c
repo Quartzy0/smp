@@ -50,7 +50,8 @@ int main(int argc, char **argv) {
             .tv_usec = 50000,
     };
     event_add(dbus_polling, &tv);
-    ctrl_set_dbus_ifaces(ctx, dbus_state->mplayer_iface, dbus_state->mplaylist_iface, dbus_state->mtracks_iface);
+    ctrl_set_dbus_ifaces(ctx, dbus_state->mplayer_iface, dbus_state->mplaylist_iface, dbus_state->mtracks_iface, dbus_state->smp_iface,
+                         dbus_state->bus);
 
     ctrl_init_audio(ctx, initial_volume);
 

@@ -17,6 +17,7 @@ option(NO_PIPEWIRE "Use PipeWire as backend" OFF)
 file(GLOB smp_SRC CONFIGURE_DEPENDS "src/*.h" "src/*.c")
 
 add_executable(smp ${smp_SRC})
+target_compile_options(smp PRIVATE "-march=native")
 
 find_package(PipeWire QUIET)
 if (NOT NO_PIPEWIRE AND PipeWire_FOUND)
@@ -38,6 +39,7 @@ set(CJSON_BUILD_SHARED_LIBS OFF)
 set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(lib/cjson EXCLUDE_FROM_ALL)
 
+set(DBUS_UTIL_BUILD_SHARED OFF)
 add_subdirectory(lib/dbus-util)
 
 include(cmake/FileEmbed.cmake)

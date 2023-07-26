@@ -7,14 +7,16 @@
 #include <spa/param/audio/format-utils.h>
 #include <pipewire/pipewire.h>
 #include <math.h>
-#include "dbus.h"
 #include "util.h"
 #include <errno.h>
 #include <unistd.h>
 
+#include <immintrin.h>
+
 #define ERR_NULL(p, r) if (!(p)){ fprintf(stderr, "Error occurred in " __FILE__ ":%d : %s\n", __LINE__, strerror(errno)); return r; }
 
-static const uint8_t TRACK_OVER_SIG = 1;
+static const enum AudioThreadSignal TRACK_OVER_SIG = AUDIO_THREAD_SIGNAL_TRACK_OVER;
+static const enum AudioThreadSignal SEEKED_SIG = AUDIO_THREAD_SIGNAL_SEEKED;
 
 struct audio_context {
     bool status: 1;
@@ -68,6 +70,7 @@ static void on_process(void *userdata) {
         } else if (data->audio_info.finished_reading) {
             data->audio_buf->offset += seek_offset;
             if (data->audio_buf->offset >= data->audio_info.total_frames) {
+                write(data->track_over_fd, &SEEKED_SIG, sizeof(SEEKED_SIG));
                 write(data->track_over_fd, &TRACK_OVER_SIG, sizeof(TRACK_OVER_SIG));
                 data->seek = 0;
                 goto finish;
@@ -85,7 +88,8 @@ static void on_process(void *userdata) {
             }
         }
         data->seek = 0;
-        nozero:;
+        nozero:
+        write(data->track_over_fd, &SEEKED_SIG, sizeof(SEEKED_SIG));
     }
 
     size_t max_frames = (buf->datas[0].maxsize / sizeof(*data->audio_buf->buf)) / data->audio_info.channels;
@@ -93,13 +97,36 @@ static void on_process(void *userdata) {
             max_frames < (data->audio_info.total_frames - data->audio_buf->offset)
             ? max_frames : (data->audio_info.total_frames - data->audio_buf->offset);
     num_read *= data->audio_info.channels;
-    memcpy(dst, &data->audio_buf->buf[data->audio_buf->offset * data->audio_info.channels],
-           num_read * sizeof(*data->audio_buf->buf));
+    float *s_buf = &data->audio_buf->buf[data->audio_buf->offset * data->audio_info.channels];
+
     data->audio_buf->offset += num_read / data->audio_info.channels;
     const double volumeDb = -6.0;
     const float volumeMultiplier = (float) (data->volume * pow(10.0, (volumeDb / 20.0)));
-    for (uint32_t i = 0; i < num_read; ++i) {
-        dst[i] *= volumeMultiplier;
+    uint32_t i = 0;
+
+#ifdef __AVX__
+    {
+        const __m256 multiplier = _mm256_set1_ps(volumeMultiplier);
+        for (i = 0; i < num_read >> 3; ++i) {
+            __m256 x = _mm256_loadu_ps(s_buf + (i << 3));
+            __m256 res = _mm256_mul_ps(x, multiplier);
+            _mm256_storeu_ps(dst + (i << 3), res);
+        }
+    }
+#endif
+#ifdef __SSE__
+    {
+        const __m128 multiplier = _mm_set1_ps(volumeMultiplier);
+        for (i <<= 3; i < num_read >> 2; ++i) {
+            __m128 x = _mm_loadu_ps(s_buf + (i << 2));
+            __m128 res = _mm_mul_ps(x, multiplier);
+            _mm_storeu_ps(dst + (i << 2), res);
+        }
+    }
+#endif
+
+    for (i <<= 2; i < num_read; ++i) {
+        dst[i] = s_buf[i] * volumeMultiplier;
     }
     if (data->audio_info.finished_reading &&
         data->audio_info.total_frames <= data->audio_buf->offset) {
@@ -120,7 +147,7 @@ static const struct pw_stream_events stream_events = {
 };
 
 struct audio_context *
-audio_init(struct buffer *audio_buf, int track_over_fd) {
+audio_init(struct buffer *audio_buf, int track_over_fd, dbus_interface *player_iface) {
     pw_init(NULL, NULL);
     struct audio_context *data = calloc(1, sizeof(*data));
     data->audio_buf = audio_buf;

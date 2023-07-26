@@ -34,6 +34,11 @@ enum UriType{
     URI_PLAYLIST = 3,
 };
 
+enum AudioThreadSignal{
+    AUDIO_THREAD_SIGNAL_TRACK_OVER = 0,
+    AUDIO_THREAD_SIGNAL_SEEKED = 1,
+};
+
 struct decode_context {
     enum VorbisDecodeState {
         START,

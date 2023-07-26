@@ -22,7 +22,9 @@ struct search_params {
 
 struct smp_context *ctrl_create_context(struct event_base *base);
 
-void ctrl_set_dbus_ifaces(struct smp_context *ctx, dbus_interface *player, dbus_interface *playlists, dbus_interface *tracks);
+void
+ctrl_set_dbus_ifaces(struct smp_context *ctx, dbus_interface *player, dbus_interface *playlists, dbus_interface *tracks,
+                     dbus_interface *smp, dbus_bus *bus);
 
 void ctrl_init_audio(struct smp_context *ctx, double initial_volume);
 

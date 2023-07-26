@@ -30,6 +30,10 @@
             <arg name="Uri" type="s"/>
         </method>
 
+        <signal name="Seeked">
+            <arg type="x" name="Position" direction="out"/>
+        </signal>
+
         <property name="PlaybackStatus" type="s" access="read"/>
         <property name="LoopStatus" type="s" access="readwrite"/>
         <property name="Rate" type="d" access="readwrite"/>
@@ -77,6 +81,8 @@
         <property name="CanEditTracks" type="b" access="read"/>
     </interface>
     <interface name="me.quartzy.smp">
+        <property name="ReplaceOld" type="b" access="readwrite"/>
+
         <method name="Search">
             <arg name="Tracks" type="b"/>
             <arg name="Albums" type="b"/>

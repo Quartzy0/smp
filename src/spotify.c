@@ -917,7 +917,6 @@ parse_album_json(const char *data, size_t len, void *userp) {
         *track_size += track_array_len;
     }
     size_t i = *track_len;
-    *track_len += track_array_len;
     memcpy(playlist->spotify_id, cJSON_GetObjectItem(root, "id")->valuestring, 23);
     playlist->image_url = strdup(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "images"), 0),
                                                      "url")->valuestring);
@@ -930,8 +929,8 @@ parse_album_json(const char *data, size_t len, void *userp) {
         playlist->reference_count++;
         i++;
     }
+    playlist->track_count = i - *track_len;
     *track_len = i;
-    playlist->track_count = cJSON_GetArraySize(tracks_array);
     cJSON_Delete(root);
     return 0;
 }
@@ -967,7 +966,6 @@ parse_playlist_json(const char *data, size_t len, void *userp) {
         *track_size += track_array_len;
     }
     size_t i = *track_len;
-    *track_len += track_array_len;
 
     playlist->image_url = strdup(
             cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "images"), 0), "url")->valuestring);
@@ -980,8 +978,8 @@ parse_playlist_json(const char *data, size_t len, void *userp) {
         playlist->reference_count++;
         i++;
     }
+    playlist->track_count = i - *track_len;
     *track_len = i;
-    playlist->track_count = track_array_len;
     cJSON_Delete(root);
     return 0;
 }
@@ -1012,7 +1010,6 @@ parse_recommendations_json(const char *data, size_t len, void *userp) {
     }
 
     size_t i = *track_len;
-    *track_len += track_array_len;
 
     cJSON *track;
     cJSON_ArrayForEach(track, tracks_array) {

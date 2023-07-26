@@ -167,10 +167,11 @@ static void ActivePlaylist_cb(dbus_bus *bus, dbus_message_context *ctx, void *pa
     dbus_util_message_context_enter_variant(&ctx, "(b(oss))");
     dbus_util_message_context_enter_struct(&ctx);
 
-    bool value = audio_started(audio_ctx) && spotify->tracks[0].playlist && spotify->tracks[0].playlist->not_empty;
+    size_t track_index = ctrl_get_track_index(smp_ctx);
+    bool value = audio_started(audio_ctx) && spotify->tracks[track_index].playlist && spotify->tracks[track_index].playlist->not_empty;
     dbus_util_message_context_add_bool(ctx, value);
 
-    add_playlist_dbus(ctx, value ? spotify->tracks[0].playlist : NULL);
+    add_playlist_dbus(ctx, value ? spotify->tracks[track_index].playlist : NULL);
 
     dbus_util_message_context_exit_struct(&ctx);
     dbus_util_message_context_exit_variant(&ctx);
@@ -534,8 +535,9 @@ init_dbus(struct smp_context *ctx) {
     dbus_util_set_method_cb(dbus_state->mtracks_iface, "Goto", Goto_cb, ctx);
     dbus_util_set_method_cb(dbus_state->mtracks_iface, "GetTracksMetadata", GetTracksMetadata_cb, ctx);
 
-    dbus_interface *smp_iface = dbus_util_find_interface(dbus_state->mpris_obj, "me.quartzy.smp");
-    dbus_util_set_method_cb(smp_iface, "Search", Search_cb, ctx);
+    dbus_state->smp_iface = dbus_util_find_interface(dbus_state->mpris_obj, "me.quartzy.smp");
+    dbus_util_set_method_cb(dbus_state->smp_iface, "Search", Search_cb, ctx);
+    dbus_util_set_property_bool(dbus_state->smp_iface, "ReplaceOld", false);
 
     return dbus_state;
 }
