@@ -750,6 +750,9 @@ parse_track_cjson(cJSON *track_json, Track *track) {
         fprintf(stderr, "[spotify] Local spotify tracks cannot be downloaded. (ID: %s)\n", id);
         return 1;
     }
+    if (cJSON_IsFalse(cJSON_GetObjectItem(track_json, "is_playable"))){
+        return 1; // TODO: Handle this when the reason is regional
+    }
 
     track->playlist = NULL;
     memcpy(track->spotify_id, id, SPOTIFY_ID_LEN_NULL);

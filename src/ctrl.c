@@ -6,6 +6,7 @@
 #include <event2/event.h>
 #include <unistd.h>
 #include <string.h>
+#include <math.h>
 #include "ctrl.h"
 #include "audio.h"
 #include "dbus.h"
@@ -25,19 +26,61 @@ struct smp_context {
     dbus_interface *tracks_iface;
     dbus_interface *smp_iface;
 
-    size_t track_index;
+    bool shuffle;
+
+    int64_t track_index;
+    int64_t *shuffle_table;
+    int64_t shuffle_table_size;
+    int64_t shuffle_index;
 };
 
 bool recommendations_loading = false;
 struct connection *currently_streaming;
 PlaylistInfo *previous_playlist = NULL;
 
+static int64_t
+random_int(int64_t max){
+    return (int64_t) round(((double) (rand())/ (double) (RAND_MAX)) * (double) max);
+}
+
 static void
-wrapped_play_track(struct smp_context *ctx, Track* track, struct buffer *buf){
+update_shuffle_table(struct smp_context *ctx, int64_t from, int64_t size) {
+    if (!size || (size == ctx->shuffle_table_size && ctx->shuffle_table) || from >= size) return;
+
+    if (ctx->shuffle_table_size != size){
+        int64_t *tmp = realloc(ctx->shuffle_table, size * sizeof(*ctx->shuffle_table));
+        if (!tmp){
+            perror("Error when calling realloc");
+            exit(EXIT_FAILURE);
+        }
+        ctx->shuffle_table = tmp;
+        ctx->shuffle_table_size = size;
+    }
+
+    for (int64_t i = from; i < size; ++i) {
+        ctx->shuffle_table[i] = i;
+    }
+
+    int64_t i1, i2, tmp;
+    for (int64_t i = from; i < size; ++i) {
+        i1 = from + random_int(size-from-1);
+        i2 = from + random_int(size-from-1);
+
+        tmp = ctx->shuffle_table[i1];
+        ctx->shuffle_table[i1] = ctx->shuffle_table[i2];
+        ctx->shuffle_table[i2] = tmp;
+    }
+}
+
+static void
+wrapped_play_track(struct smp_context *ctx) {
     cancel_track_transfer(currently_streaming);
-    if(play_track(ctx->spotify, track, buf, &currently_streaming)){
+    if (ctx->shuffle) ctx->track_index = ctx->shuffle_table[ctx->shuffle_index];
+    Track *track = &ctx->spotify->tracks[ctx->track_index];
+    if(play_track(ctx->spotify, track, &ctx->audio_buf, &currently_streaming)){
         fprintf(stderr, "[ctrl] Error occurred while trying to play track, playing next one.\n");
-        ctrl_change_track_index(ctx, 1);
+        static const enum AudioThreadSignal NEXT_SIG = AUDIO_THREAD_SIGNAL_TRACK_OVER;
+        write(ctx->audio_next_fd[1], &NEXT_SIG, sizeof(NEXT_SIG));
         return;
     }
     if (track->playlist != previous_playlist){
@@ -50,11 +93,20 @@ wrapped_play_track(struct smp_context *ctx, Track* track, struct buffer *buf){
 }
 
 static void
+wrapped_update_shuffle_table(struct spotify_state *spotify, void *userp){
+    struct smp_context *ctx = (struct smp_context*) userp;
+    bool should_add = audio_started(ctx->audio_ctx) && ctx->shuffle_table_size > ctx->shuffle_index;
+    update_shuffle_table(ctx, ctx->shuffle_index + ((int64_t) should_add), (int64_t) spotify->track_count);
+}
+
+static void
 tracks_loaded_cb(struct spotify_state *spotify, void *userp) {
     struct smp_context *ctx = (struct smp_context*) userp;
     recommendations_loading = false;
     printf("[ctrl] Track list loaded\n");
-    wrapped_play_track(ctx, &spotify->tracks[ctx->track_index], &spotify->smp_ctx->audio_buf);
+    bool should_add = audio_started(ctx->audio_ctx) && ctx->shuffle_table_size > ctx->shuffle_index;
+    update_shuffle_table(ctx, ctx->shuffle_index + ((int64_t) should_add), (int64_t) ctx->spotify->track_count);
+    wrapped_play_track(ctx);
     dbus_util_invalidate_property(ctx->tracks_iface, "Tracks");
 }
 
@@ -166,6 +218,7 @@ ctrl_free(struct smp_context *ctx){
     close(ctx->audio_next_fd[1]);
     memset(ctx->spotify, 0, sizeof(*ctx->spotify));
     free(ctx->spotify);
+    free(ctx->shuffle_table);
     memset(ctx, 0, sizeof(*ctx));
     free(ctx);
 }
@@ -176,14 +229,16 @@ ctrl_play_album(struct smp_context *ctx, const char *id) {
     if (dbus_util_get_property_bool(ctx->smp_iface, "ReplaceOld")) {
         clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
         ctx->track_index = 0;
+        ctx->shuffle_index = 0;
     }
 
     if (ctx->spotify->track_count == 0)
         add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, true,
                      playlist_loaded_cb, ctx, tracks_loaded_cb);
     else
-        add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, true,
-                     NULL, NULL, NULL);
+        add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count,
+                     true,
+                     wrapped_update_shuffle_table, ctx, NULL);
 }
 
 void
@@ -192,14 +247,16 @@ ctrl_play_playlist(struct smp_context *ctx, const char *id){
     if (dbus_util_get_property_bool(ctx->smp_iface, "ReplaceOld")) {
         clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
         ctx->track_index = 0;
+        ctx->shuffle_index = 0;
     }
 
     if (ctx->spotify->track_count == 0)
         add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, false,
                      playlist_loaded_cb, ctx, tracks_loaded_cb);
     else
-        add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, false,
-                 NULL, NULL, NULL);
+        add_playlist(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count,
+                     false,
+                     wrapped_update_shuffle_table, ctx, NULL);
 }
 
 void
@@ -209,9 +266,10 @@ ctrl_play_track(struct smp_context *ctx, const char *id){
     if (dbus_util_get_property_bool(ctx->smp_iface, "ReplaceOld")) {
         clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
         ctx->track_index = 0;
+        ctx->shuffle_index = 0;
     }
 
-    info_received_cb cb = NULL;
+    info_received_cb cb = wrapped_update_shuffle_table;
     if (ctx->spotify->track_count == 0) cb = tracks_loaded_cb;
     add_track_info(ctx->spotify, id, &ctx->spotify->tracks, &ctx->spotify->track_size, &ctx->spotify->track_count, cb, ctx);
 }
@@ -260,21 +318,16 @@ ctrl_stop(struct smp_context *ctx){
 
 void
 ctrl_change_track_index(struct smp_context *ctx, int32_t i){
-    if (ctx->track_index == -1 || ctx->spotify->track_size == -1 || ctx->spotify->track_count == -1 || ctx->spotify->track_count == 0) return;
-    if (loop_mode == LOOP_MODE_TRACK) {
-        //Do nothing
-    } else if (shuffle) {
-        size_t newI;
-        while ((newI = (size_t) ((float) ctx->spotify->track_count *
-                                 ((float) rand() / (float) RAND_MAX))) == ctx->track_index &&
-                ctx->spotify->track_count > 1) {}
-        ctx->track_index = newI;
-    } else {
-        ctx->track_index += i;
-        if (ctx->track_index >= ctx->spotify->track_count || ctx->track_index < 0) {
+    if (ctx->spotify->track_count == 0 || !audio_started(ctx->audio_ctx)) return;
+    if (loop_mode != LOOP_MODE_TRACK)  {
+        if (ctx->shuffle) ctx->shuffle_index += i;
+        else ctx->track_index += i;
+        if ((!ctx->shuffle && (ctx->track_index >= ctx->spotify->track_count || ctx->track_index < 0)) ||
+              ctx->shuffle && (ctx->shuffle_index >= ctx->spotify->track_count || ctx->shuffle_index < 0)) {
             if (loop_mode == LOOP_MODE_PLAYLIST) {
                 ctx->track_index = 0;
-                wrapped_play_track(ctx, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
+                ctx->shuffle_index = 0;
+                wrapped_play_track(ctx);
                 return;
             }
             //Continue playing recommendations
@@ -286,7 +339,7 @@ ctrl_change_track_index(struct smp_context *ctx, int32_t i){
             return;
         }
     }
-    wrapped_play_track(ctx, &ctx->spotify->tracks[ctx->track_index], &ctx->audio_buf);
+    wrapped_play_track(ctx);
 }
 
 void ctrl_set_track_index(struct smp_context *ctx, int32_t i){
@@ -330,4 +383,17 @@ struct spotify_state *ctrl_get_spotify_state(struct smp_context *ctx){
 
 size_t ctrl_get_track_index(struct smp_context *ctx){
     return ctx->track_index;
+}
+
+void ctrl_set_shuffle(struct smp_context *ctx, bool shuffle){
+    if (!ctx->shuffle && shuffle && audio_started(ctx->audio_ctx)){ // Make it so tracks which have already been played aren't played in the future
+        update_shuffle_table(ctx, 0, ctx->track_index + 1);
+        ctx->shuffle_index = ctx->track_index;
+        update_shuffle_table(ctx, ctx->track_index + 1, (int64_t) ctx->spotify->track_count);
+    }
+    ctx->shuffle = shuffle;
+}
+
+bool ctrl_get_shuffle(struct smp_context *ctx){
+    return ctx->shuffle;
 }

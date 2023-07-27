@@ -243,13 +243,17 @@ static void LoopStatus_set_cb(dbus_bus *bus, dbus_message_context *ctx, void *pa
 }
 
 static void Shuffle_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
-    dbus_util_message_context_add_bool_variant(ctx, shuffle);
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    dbus_util_message_context_add_bool_variant(ctx, ctrl_get_shuffle(smp_ctx));
 }
 
 static void Shuffle_set_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){
+    struct smp_context *smp_ctx = (struct smp_context*) param;
+    bool shuffle;
     dbus_util_message_context_enter_variant(&ctx, "b");
     dbus_util_message_context_get_bool(ctx, &shuffle);
     dbus_util_message_context_exit_variant(&ctx);
+    ctrl_set_shuffle(smp_ctx, shuffle);
 }
 
 static void Position_cb(dbus_bus *bus, dbus_message_context *ctx, void *param){

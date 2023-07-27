@@ -8,7 +8,6 @@
 #include "audio.h"
 
 LoopMode loop_mode = LOOP_MODE_NONE;
-bool shuffle = false;
 
 enum UriType
 id_from_url(const char *src, char *out) {

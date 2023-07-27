@@ -68,4 +68,8 @@ struct spotify_state *ctrl_get_spotify_state(struct smp_context *ctx);
 
 size_t ctrl_get_track_index(struct smp_context *ctx);
 
+void ctrl_set_shuffle(struct smp_context *ctx, bool shuffle);
+
+bool ctrl_get_shuffle(struct smp_context *ctx);
+
 #endif //SMP_CTRL_H

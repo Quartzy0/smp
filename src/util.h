@@ -67,7 +67,6 @@ struct audio_info;
 typedef void(*audio_info_cb)(void *userp, struct audio_info *info, struct audio_info *previous);
 
 extern LoopMode loop_mode;
-extern bool shuffle;
 
 #ifndef VEC_STEP
 #define VEC_STEP 10
