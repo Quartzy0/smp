@@ -313,6 +313,10 @@ void
 ctrl_stop(struct smp_context *ctx){
     audio_stop(ctx->audio_ctx);
     clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
+    previous_playlist = NULL;
+    cancel_track_transfer(currently_streaming);
+    currently_streaming = NULL;
+    recommendations_loading = false;
     dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
 }
 
@@ -320,8 +324,13 @@ void
 ctrl_change_track_index(struct smp_context *ctx, int32_t i){
     if (ctx->spotify->track_count == 0 || !audio_started(ctx->audio_ctx)) return;
     if (loop_mode != LOOP_MODE_TRACK)  {
-        if (ctx->shuffle) ctx->shuffle_index += i;
-        else ctx->track_index += i;
+        if (ctx->shuffle){
+            if (ctx->shuffle_index >= ctx->spotify->track_count) return;
+            ctx->shuffle_index += i;
+        } else {
+            if (ctx->track_index >= ctx->spotify->track_count) return;
+            ctx->track_index += i;
+        }
         if ((!ctx->shuffle && (ctx->track_index >= ctx->spotify->track_count || ctx->track_index < 0)) ||
               ctx->shuffle && (ctx->shuffle_index >= ctx->spotify->track_count || ctx->shuffle_index < 0)) {
             if (loop_mode == LOOP_MODE_PLAYLIST) {

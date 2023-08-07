@@ -66,12 +66,10 @@ free_tracks(Track *track, size_t count) {
     if (!track || !count) return;
     for (int i = 0; i < count; ++i) {
         free(track[i].spotify_name);
-        track[i].spotify_name = NULL;
         free(track[i].spotify_album_art);
-        track[i].spotify_album_art = NULL;
         free(track[i].artist);
-        track[i].artist = NULL;
     }
+    memset(track, 0, sizeof(*track) * count);
 }
 
 void
@@ -271,7 +269,7 @@ void spotify_bufferevent_cb(struct bufferevent *bev, short what, void *ctx) {
                 if (conn->spotify->err_cb) conn->spotify->err_cb(conn, conn->spotify->err_userp);
                 conn->inst->disabled = true;
             } else {
-                fprintf(stderr, "[spotify] Error occurred on connection. Closing because was idle.\n");
+                printf("[spotify] Error occurred on connection. Closing because was idle.\n");
             }
             free_connection(conn);
             bufferevent_free(bev);

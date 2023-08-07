@@ -39,8 +39,14 @@ compare_last_played_reverse(const void *a, const void *b) {
 }
 
 static void add_track_metadata(struct audio_context *audio_ctx, dbus_message_context *ctx, Track *track) {
-    if (!track || !audio_started(audio_ctx)){
+    if (!track || !audio_started(audio_ctx) || track->spotify_id[0] == 0 /* unset */){
         dbus_util_message_context_enter_array(&ctx, "{sv}");
+
+        dbus_util_message_context_enter_dict_entry(&ctx);
+        dbus_util_message_context_add_string(ctx, "mpris:trackid");
+        dbus_util_message_context_add_object_path_variant(ctx, "/org/mpris/MediaPlayer2/TrackList/NoTrack");
+        dbus_util_message_context_exit_dict_entry(&ctx);
+
         dbus_util_message_context_exit_array(&ctx);
         return;
     }
