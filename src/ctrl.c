@@ -317,7 +317,15 @@ ctrl_stop(struct smp_context *ctx){
     cancel_track_transfer(currently_streaming);
     currently_streaming = NULL;
     recommendations_loading = false;
+    ctx->track_index = 0;
+    ctx->shuffle_index = 0;
+    free(ctx->shuffle_table);
+    ctx->shuffle_table = NULL;
+    ctx->shuffle_table_size = 0;
+    ctx->shuffle = false;
     dbus_util_invalidate_property(ctx->player_iface, "PlaybackStatus");
+    dbus_util_invalidate_property(ctx->player_iface, "Shuffle");
+    dbus_util_invalidate_property(ctx->tracks_iface, "Tracks");
 }
 
 void
