@@ -342,11 +342,19 @@ static void SetPosition_cb(dbus_bus *bus, dbus_object *object, dbus_interface *i
                     void *param){
     struct smp_context *ctx = (struct smp_context*) param;
     int64_t pos;
+    const char *track_obj;
     dbus_message_context *rctx = dbus_util_make_read_context(call);
+    dbus_util_message_context_get_object_path(rctx, &track_obj);
     dbus_util_message_context_get_int64(rctx, &pos);
     dbus_util_message_context_free(rctx);
 
-    ctrl_seek_to(ctx, pos);
+    struct spotify_state *spotify = ctrl_get_spotify_state(ctx);
+    Track *track = &spotify->tracks[ctrl_get_track_index(ctx)];
+    const char *id_start = strrchr(track_obj, '/');
+
+    if (id_start && strlen(id_start+1) >= 22 && !memcmp(id_start+1, track->spotify_id, 22)){
+        ctrl_seek_to(ctx, pos);
+    }
 
     dbus_util_send_empty_reply(call);
 }
