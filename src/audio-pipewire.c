@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <immintrin.h>
+#include <pthread.h>
 
 #define ERR_NULL(p, r) if (!(p)){ fprintf(stderr, "Error occurred in " __FILE__ ":%d : %s\n", __LINE__, strerror(errno)); return r; }
 
@@ -46,7 +47,10 @@ static void on_process(void *userdata) {
     struct spa_buffer *buf;
     float *dst;
 
-    if (!data->started || !data->status || !data->audio_buf->len || !data->audio_info.channels ||
+    if (!data->started){
+        pthread_exit(NULL);
+    }
+    if (!data->status || !data->audio_buf->len || !data->audio_info.channels ||
         (data->audio_info.finished_reading &&
          data->audio_info.total_frames <=
          data->audio_buf->offset))
@@ -147,7 +151,7 @@ static const struct pw_stream_events stream_events = {
 };
 
 struct audio_context *
-audio_init(struct buffer *audio_buf, int track_over_fd, dbus_interface *player_iface) {
+audio_init(struct buffer *audio_buf, int track_over_fd) {
     pw_init(NULL, NULL);
     struct audio_context *data = calloc(1, sizeof(*data));
     data->audio_buf = audio_buf;
@@ -169,6 +173,7 @@ int audio_play(struct audio_context *ctx) {
 int audio_stop(struct audio_context *ctx) {
     if (!ctx->started) return 0;
     ctx->status = false;
+    ctx->started = false;
 
     pw_thread_loop_stop(ctx->loop);
     pw_stream_destroy(ctx->stream);
@@ -176,8 +181,6 @@ int audio_stop(struct audio_context *ctx) {
 
     ctx->audio_buf->offset = 0;
     ctx->audio_buf->len = 0;
-
-    ctx->started = false;
     return 0;
 }
 
@@ -225,8 +228,8 @@ int audio_start(struct audio_context *ctx, struct audio_info *info, struct audio
                       PW_STREAM_FLAG_RT_PROCESS,
                       params, 1);
 
-    pw_thread_loop_start(ctx->loop);
     ctx->started = true;
+    pw_thread_loop_start(ctx->loop);
 
     return audio_play(ctx);
 }
@@ -247,7 +250,6 @@ void audio_seek(struct audio_context *ctx, int64_t position) {
 
 void audio_seek_to(struct audio_context *ctx, int64_t position) {
     if (!ctx->started) return;
-    int64_t seek;
     if (ctx->audio_info.finished_reading &&
         (position > (int64_t) (ctx->audio_info.total_frames / ctx->audio_info.sample_rate) * 1000000 ||
          position < 0))

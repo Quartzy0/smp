@@ -15,7 +15,7 @@ struct buffer;
 
 #define FRAMES_PER_BUFFER   (512)
 
-struct audio_context *audio_init(struct buffer *audio_buf, int track_over_fd, dbus_interface *player_iface);
+struct audio_context *audio_init(struct buffer *audio_buf, int track_over_fd);
 
 int audio_start(struct audio_context *ctx, struct audio_info *info, struct audio_info *previous);
 

@@ -188,7 +188,7 @@ ctrl_set_dbus_ifaces(struct smp_context *ctx, dbus_interface *player, dbus_inter
 void ctrl_init_audio(struct smp_context *ctx, double initial_volume) {
     ctx->audio_buf.buf = calloc(12000000, sizeof(*ctx->audio_buf.buf));
     ctx->audio_buf.size = 12000000;
-    ctx->audio_ctx = audio_init(&ctx->audio_buf, ctx->audio_next_fd[1], NULL);
+    ctx->audio_ctx = audio_init(&ctx->audio_buf, ctx->audio_next_fd[1]);
     audio_set_volume(ctx->audio_ctx, initial_volume);
 }
 
@@ -214,6 +214,7 @@ ctrl_free(struct smp_context *ctx){
         free(ctx->spotify->connections[i].cache_path);
     }
     clear_tracks(ctx->spotify->tracks, &ctx->spotify->track_count, &ctx->spotify->track_size);
+    free(ctx->spotify->tracks);
     close(ctx->audio_next_fd[0]);
     close(ctx->audio_next_fd[1]);
     memset(ctx->spotify, 0, sizeof(*ctx->spotify));

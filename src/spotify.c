@@ -34,7 +34,7 @@ struct ArtistQuantity {
 
 bool
 contains_regions(char *regions, size_t region_count, char *region) {
-    if (!region_count) return true;
+    if (!region_count || !regions) return true;
     char *ret = regions;
     while (ret) {
         ret = memchr(ret, region[0], region_count * 2 - (ret - regions));
@@ -77,6 +77,7 @@ free_track(Track *track) {
     free(track->spotify_name);
     free(track->spotify_album_art);
     free(track->artist);
+    free(track->regions);
     if (track->playlist) {
         if (--track->playlist->reference_count == 0) {
             free(track->playlist->name);
@@ -774,7 +775,7 @@ parse_track_cjson(cJSON *track_json, Track *track) {
 
     cJSON *markets = cJSON_GetObjectItem(track_json, "available_markets");
     track->region_count = cJSON_GetArraySize(markets);
-    track->regions = calloc(track->region_count, 2);
+    track->regions = track->region_count ? calloc(track->region_count, 2) : NULL;
 
     int i = 0;
     cJSON *e;
